@@ -146,3 +146,15 @@ def test_endless_loop_fails_as_a_timeout(tmp_path):
     assert result.returncode == 2, result.stdout + result.stderr
     assert "timed out" in result.stdout
     assert "input #50: []" in result.stdout
+
+
+@pytest.mark.parametrize("anchor", [
+    "\t\t\t{\n\t\t\t\tif (tok->depth >= tok->max_depth - 1)",  # array element
+    "\t\tcase json_tokener_state_object_value:\n\t\t\tif (tok->depth >= tok->max_depth - 1)",  # object value
+])
+def test_off_by_one_in_the_nesting_limit_is_caught(tmp_path, anchor):
+    # One level too many overruns the tokener's per-level stack, so ASan stops
+    # it on the first 32-deep input before any answer can differ.
+    result = run_check(candidate(tmp_path, anchor, anchor.replace(">=", ">")))
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "heap-buffer-overflow" in result.stdout
