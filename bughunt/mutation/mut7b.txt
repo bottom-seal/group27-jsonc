@@ -1,0 +1,33 @@
+199 killed-both
+22 survived
+12 killed-oneshot-only
+7 killed-timeout
+4 killed-chunked-only
+4 killed-crash
+2 nocompile
+('survived', 1092, "if (!(*num >= '0' && *num <= '9'))", '||')
+('survived', 1493, 'default: break;', ';')
+('survived', 887, 'tok->st_pos = 0;', '1')
+('survived', 530, "if (printbuf_length(tok->pb) > 0 && *(tok->pb->buf) == '-')", '||')
+('killed-chunked-only', 952, 'int pos_sign_ok = 0;', '1')
+('survived', 1194, 'break;', ';')
+('survived', 604, 'printbuf_memappend_checked(tok->pb, &c, 1);', '0')
+('survived', 1549, 'if (c_numeric_locale != (locale_t)0)', '1')
+('survived', 1005, 'default: break;', ';')
+('killed-chunked-only', 970, 'neg_sign_ok = 0;', '1')
+('survived', 357, 'if (c_numeric_locale == (locale_t)0)', '1')
+('survived', 838, 'else if (tok->ucs_char < 0x110000)', '<=')
+('survived', 1106, 'if (tok->is_double && !(tok->flags & JSON_TOKENER_STRICT))', '||')
+('killed-chunked-only', 965, 'is_exponent = 1;', '0')
+('survived', 349, 'if ((len < -1) || (len == -1 && strlen(str) > INT32_MAX))', '||')
+('survived', 645, 'printbuf_memappend_checked(tok->pb, &c, 1);', '0')
+('survived', 1059, "if (*num >= '0' && *num <= '9')", '<')
+('killed-chunked-only', 1144, "else if (!tok->is_double && tok->pb->buf[0] != '-' &&", '1')
+('survived', 530, "if (printbuf_length(tok->pb) > 0 && *(tok->pb->buf) == '-')", '>=')
+('survived', 620, 'printbuf_memappend_checked(tok->pb, case_start, 1 + str - case_start);', '0')
+('survived', 1065, "else if (*num >= '1' && *num <= '9')", '0')
+('survived', 1492, 'break;', ';')
+('survived', 402, 'printbuf_memappend_checked(tok->pb, &c, 1);', '0')
+('survived', 953, 'if (printbuf_length(tok->pb) > 0)', '>=')
+('survived', 349, 'if ((len < -1) || (len == -1 && strlen(str) > INT32_MAX))', '>=')
+('survived', 544, 'break;', ';')

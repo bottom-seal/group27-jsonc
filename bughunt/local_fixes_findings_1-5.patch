@@ -1,0 +1,89 @@
+From 49d74977ad32ef4ea1299a5345afa1dd0c537293 Mon Sep 17 00:00:00 2001
+From: x <a@b>
+Date: Sat, 21 Nov 2026 19:54:49 +0000
+Subject: [PATCH 1/2] local fixes for findings 1-5
+
+---
+ json_tokener.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/json_tokener.c b/json_tokener.c
+index a1e5561..2388639 100644
+--- a/json_tokener.c
++++ b/json_tokener.c
+@@ -649,7 +649,7 @@ struct json_object *json_tokener_parse_ex(struct json_tokener *tok, const char *
+ 				MC_DEBUG("json_tokener_comment: %s\n", tok->pb->buf);
+ 				state = json_tokener_state_eatws;
+ 			}
+-			else
++			else if (c != '*') /* LOCAL FIX (finding 2): stay on a run of stars */
+ 			{
+ 				state = json_tokener_state_comment;
+ 			}
+@@ -1278,7 +1278,7 @@ struct json_object *json_tokener_parse_ex(struct json_tokener *tok, const char *
+ 				saved_state = json_tokener_state_finish;
+ 				state = json_tokener_state_eatws;
+ 			}
+-			else if (c == '"' || c == '\'')
++			else if (c == '"' || (c == '\'' && !(tok->flags & JSON_TOKENER_STRICT))) /* LOCAL FIX (finding 4) */
+ 			{
+ 				tok->quote_char = c;
+ 				printbuf_reset(tok->pb);
+@@ -1402,7 +1402,9 @@ out:
+ 		/* Only a sequence cut off by the end of this chunk may be
+ 		 * finished by the next call; anything else is truncated.
+ 		 */
+-		if (tok->utf8_state != 0)
++		/* LOCAL FIX (finding 3): a completed value's unconsumed lookahead
++		 * byte may have opened a sequence; it is re-read by the next call. */
++		if (tok->utf8_state != 0 && tok->err != json_tokener_success)
+ 			tok->err = json_tokener_error_parse_utf8_string;
+ 		tok->utf8_state = 0;
+ 	}
+@@ -1416,7 +1418,10 @@ out:
+ 	if (!c)
+ 	{
+ 		/* We hit an eof char (0) */
+-		if (state != json_tokener_state_finish && saved_state != json_tokener_state_finish)
++		/* LOCAL FIX (findings 1 and 5) */
++		if (tok->err != json_tokener_error_memory &&
++		    ((state != json_tokener_state_finish && saved_state != json_tokener_state_finish) ||
++		     (tok->err == json_tokener_success && tok->depth > 0)))
+ 			tok->err = json_tokener_error_parse_eof;
+ 	}
+ 
+-- 
+2.43.0
+
+
+From d6f41fdb9b58c849716e7183abb0cf5b65e1037f Mon Sep 17 00:00:00 2001
+From: bughunt <bughunt@localhost>
+Date: Sun, 22 Nov 2026 08:46:10 +0000
+Subject: [PATCH 2/2] local fix for finding 3b: keep the state machine's error
+ when stopped on a UTF-8 lead byte
+
+---
+ json_tokener.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/json_tokener.c b/json_tokener.c
+index 2388639..95a7d14 100644
+--- a/json_tokener.c
++++ b/json_tokener.c
+@@ -1404,8 +1404,11 @@ out:
+ 		 */
+ 		/* LOCAL FIX (finding 3): a completed value's unconsumed lookahead
+ 		 * byte may have opened a sequence; it is re-read by the next call. */
+-		if (tok->utf8_state != 0 && tok->err != json_tokener_success)
+-			tok->err = json_tokener_error_parse_utf8_string;
++		/* LOCAL FIX (finding 3b): a byte that is not valid UTF-8 is already
++		 * reported by PEEK_CHAR. A pending count here only means the parser
++		 * stopped on the lead byte of a valid sequence, either as lookahead
++		 * after a complete value or because that character is a syntax
++		 * error, so keep the error the state machine chose. */
+ 		tok->utf8_state = 0;
+ 	}
+ 	if (c && (state == json_tokener_state_finish) && (tok->depth == 0) &&
+-- 
+2.43.0
+

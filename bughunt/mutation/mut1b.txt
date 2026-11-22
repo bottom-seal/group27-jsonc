@@ -1,0 +1,29 @@
+109 killed-both
+20 survived
+12 killed-oneshot-only
+3 killed-crash
+3 killed-chunked-only
+3 killed-timeout
+('killed-chunked-only', 965, 'is_exponent = 1;', '0')
+('survived', 710, 'break;', ';')
+('survived', 360, 'if (c_numeric_locale == (locale_t)0)', '1')
+('survived', 1005, 'default: break;', ';')
+('survived', 1537, 'if (ul_reason_for_call == DLL_PROCESS_DETACH) \\', '!=')
+('survived', 530, "if (printbuf_length(tok->pb) > 0 && *(tok->pb->buf) == '-')", '||')
+('survived', 375, 'if (oldlocale == NULL)', '!=')
+('survived', 357, 'if (c_numeric_locale == (locale_t)0)', '1')
+('survived', 349, 'if ((len < -1) || (len == -1 && strlen(str) > INT32_MAX))', '<=')
+('killed-chunked-only', 966, 'pos_sign_ok = neg_sign_ok = 1;', '0')
+('survived', 1065, "else if (*num >= '1' && *num <= '9')", '0')
+('survived', 530, "if (printbuf_length(tok->pb) > 0 && *(tok->pb->buf) == '-')", '>=')
+('survived', 1028, 'if (case_len > 0)', '>=')
+('survived', 1154, 'if (numuint64 <= INT64_MAX)', '<')
+('survived', 620, 'printbuf_memappend_checked(tok->pb, case_start, 1 + str - case_start);', '0')
+('survived', 953, 'if (printbuf_length(tok->pb) > 0)', '>=')
+('survived', 1059, "if (*num >= '0' && *num <= '9')", '1')
+('survived', 887, 'tok->st_pos = 0;', '1')
+('survived', 349, 'if ((len < -1) || (len == -1 && strlen(str) > INT32_MAX))', '||')
+('survived', 1382, 'break;', ';')
+('survived', 1059, "if (*num >= '0' && *num <= '9')", '<')
+('killed-chunked-only', 968, 'if (e_loc != last_saved_char)', '==')
+('survived', 1549, 'if (c_numeric_locale != (locale_t)0)', '1')

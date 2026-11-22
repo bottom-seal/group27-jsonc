@@ -1,0 +1,20 @@
+{"a":1}
+[1,2,3]
+{"a":[1,{"b":"c"}],"d":null}
+"hello"
+"é😀"
+1.5
+-12
+12345678901234567890
+NaN
+Infinity
+-Infinity
+true
+null
+[{"k":"v"},{"k":"v2"}]
+{"a":1,"a":2}
+{"long key name here":"long string value here that needs growth of the printbuf"}
+/* c */ [1, /* d */ 2] // e
+[1,]
+{"x":{"y":{"z":[[[1]]]}}}
+["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q"]
