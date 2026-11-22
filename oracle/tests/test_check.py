@@ -46,6 +46,33 @@ def test_unchanged_tokener_passes(tmp_path):
     assert "PASS" in result.stdout
 
 
+# Fixes from bughunt/local_fixes_findings_1-5.patch. Each one changes behaviour,
+# so the gate must reject it; the expected text is the input that shows the bug.
+KNOWN_BUG_FIXES = {
+    "bug1-unclosed-comment-after-value": (
+        "\t\tif (state != json_tokener_state_finish && saved_state != json_tokener_state_finish)",
+        "\t\tif ((state != json_tokener_state_finish && saved_state != json_tokener_state_finish) ||\n"
+        "\t\t    (tok->err == json_tokener_success && tok->depth > 0))",
+    ),
+    "bug2-even-stars-close-comment": (
+        "\t\t\telse\n\t\t\t{\n\t\t\t\tstate = json_tokener_state_comment;\n\t\t\t}",
+        "\t\t\telse if (c != '*')\n\t\t\t{\n\t\t\t\tstate = json_tokener_state_comment;\n\t\t\t}",
+    ),
+    "bug3-utf8-lookahead-after-value": (
+        "if ((tok->flags & JSON_TOKENER_VALIDATE_UTF8) && (nBytes != 0))",
+        "if ((tok->flags & JSON_TOKENER_VALIDATE_UTF8) && (nBytes != 0) && tok->err != json_tokener_success)",
+    ),
+}
+
+
+@pytest.mark.parametrize("bug", sorted(KNOWN_BUG_FIXES))
+def test_fixing_any_known_bug_is_rejected(tmp_path, bug):
+    old, new = KNOWN_BUG_FIXES[bug]
+    result = run_check(candidate(tmp_path, old, new))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL" in result.stdout
+
+
 def test_fixing_a_known_bug_counts_as_a_difference(tmp_path):
     # Bug 4: STRICT accepts single-quoted object keys. A rewrite that quietly
     # fixes it changes behaviour, so the gate must reject it.
