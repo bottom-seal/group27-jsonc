@@ -1,0 +1,6 @@
+# Build output from oracle scripts
+.build/
+
+# Python
+__pycache__/
+*.pyc
