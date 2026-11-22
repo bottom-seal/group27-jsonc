@@ -75,3 +75,12 @@ def test_crash_is_reported_with_the_input_it_crashed_on(tmp_path):
     assert result.returncode == 2, result.stdout + result.stderr
     assert "CRASH" in result.stdout
     assert "input #50: []" in result.stdout  # first "[]" in oracle/inputs/core.txt
+
+
+def test_candidate_that_does_not_compile_is_a_build_error(tmp_path):
+    broken = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + "\tthis does not compile;\n")
+    result = run_check(broken)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "BUILD ERROR" in result.stdout
+    # The planted line is line 331; the message must point at it in the candidate file.
+    assert f"{broken}:331" in result.stdout

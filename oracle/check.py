@@ -12,6 +12,7 @@ Exit codes:
   0  pass: the candidate answers exactly like the baseline
   1  different: some answer differs
   2  crash: the candidate crashed, hung, or a sanitizer reported an error
+  3  build error: the candidate does not compile or link
   4  internal error: the checker itself could not run (e.g. baseline broken)
 
 Needs gcc, cmake and git on PATH (or set CC / CMAKE).
@@ -36,7 +37,7 @@ CMAKE = os.environ.get("CMAKE", "cmake")
 SANITIZE = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
             "-fno-omit-frame-pointer", "-g", "-O1"]
 
-EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_INTERNAL = 0, 1, 2, 4
+EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_BUILD, EXIT_INTERNAL = 0, 1, 2, 3, 4
 
 
 class CheckerError(Exception):
@@ -142,6 +143,20 @@ def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
         return Run(out, -1, True, err)
 
 
+def build(baseline: Baseline, source: Path, tmp: Path, name: str, max_lines: int = 40) -> str:
+    """Compile and link one recorder binary at tmp/name. Returns "" on success,
+    otherwise the first lines of the compiler or linker output."""
+    obj = tmp / f"{name}.o"
+    result = baseline.compile_tokener(source, obj)
+    if result.returncode == 0:
+        result = baseline.link(obj, tmp / "recorder.o", tmp / name)
+    if result.returncode == 0:
+        return ""
+    # Show the user's path, not the temporary copy the compiler saw.
+    text = (result.stdout + result.stderr).replace(str(obj.parent / f"{name}-src" / "json_tokener.c"), str(source))
+    return "\n".join(text.strip().split("\n")[:max_lines])
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("candidate", nargs="?", default=str(REPO / "json-c" / "json_tokener.c"))
@@ -157,15 +172,13 @@ def main(argv=None) -> int:
             tmp = Path(tmp)
             baseline.compile_recorder(tmp / "recorder.o")
 
-            must_ok = baseline.compile_tokener(baseline.src / "json_tokener.c", tmp / "old.o")
-            if must_ok.returncode != 0:
-                raise CheckerError("baseline json_tokener.c does not compile:\n" + must_ok.stderr)
-            linked = baseline.link(tmp / "old.o", tmp / "recorder.o", tmp / "old")
-            if linked.returncode != 0:
-                raise CheckerError("baseline does not link:\n" + linked.stderr)
-
-            baseline.compile_tokener(Path(args.candidate), tmp / "new.o")
-            baseline.link(tmp / "new.o", tmp / "recorder.o", tmp / "new")
+            problem = build(baseline, baseline.src / "json_tokener.c", tmp, "old")
+            if problem:
+                raise CheckerError("the baseline does not build:\n" + problem)
+            problem = build(baseline, Path(args.candidate), tmp, "new")
+            if problem:
+                print(f"BUILD ERROR: the candidate {args.candidate} does not build\n{problem}")
+                return EXIT_BUILD
 
             old = run_recorder(tmp / "old", inputs, args.timeout)
             if old.returncode != 0 or old.timed_out or not old.output.endswith("#done\n"):
