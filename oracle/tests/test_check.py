@@ -44,3 +44,18 @@ def test_unchanged_tokener_passes(tmp_path):
     result = run_check(candidate(tmp_path))
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS" in result.stdout
+
+
+def test_fixing_a_known_bug_counts_as_a_difference(tmp_path):
+    # Bug 4: STRICT accepts single-quoted object keys. A rewrite that quietly
+    # fixes it changes behaviour, so the gate must reject it.
+    fixed = candidate(
+        tmp_path,
+        "else if (c == '\"' || c == '\\'')",
+        "else if (c == '\"' || (c == '\\'' && !(tok->flags & JSON_TOKENER_STRICT)))",
+    )
+    result = run_check(fixed)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL" in result.stdout
+    assert "{'a':0}" in result.stdout  # the report names a differing input
+    assert "strict" in result.stdout  # ... and the config it differed under
