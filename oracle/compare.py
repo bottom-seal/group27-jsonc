@@ -36,9 +36,12 @@ class Mismatch:
 
 @dataclass
 class Verdict:
-    status: str  # "pass" or "different"
+    status: str  # "pass", "different" or "crash"
     checks: int = 0
     mismatches: list = field(default_factory=list)
+    crash_index: "int | None" = None  # input the candidate was on when it stopped
+    crash_reason: str = ""
+    crash_log: str = ""  # the candidate's stderr, e.g. the sanitizer report
 
 
 def _records(output: str) -> dict:
@@ -60,8 +63,26 @@ def compare(old: Run, new: Run) -> Verdict:
         for (index, config), answer in old_records.items()
         if (index, config) in new_records and new_records[(index, config)] != answer
     ]
-    status = "different" if mismatches else "pass"
-    return Verdict(status, checks=len(old_records), mismatches=mismatches)
+    verdict = Verdict("different" if mismatches else "pass", checks=len(old_records), mismatches=mismatches)
+
+    reason = _crash_reason(new)
+    if reason:
+        verdict.status = "crash"
+        verdict.crash_reason = reason
+        verdict.crash_log = new.stderr
+        missing = [index for (index, config) in old_records if (index, config) not in new_records]
+        verdict.crash_index = min(missing) if missing else None
+    return verdict
+
+
+def _crash_reason(run: Run) -> str:
+    if run.timed_out:
+        return "timed out"
+    if run.returncode != 0:
+        return f"exited with code {run.returncode}"
+    if not run.output.endswith("#done\n"):
+        return "stopped before the last input"
+    return ""
 
 
 def _answer(values: tuple) -> str:
@@ -72,10 +93,32 @@ def _counts(counter: Counter) -> str:
     return ", ".join(f"{key} {n}" for key, n in counter.most_common())
 
 
+def _crash_report(verdict: Verdict, inputs: list, log_lines: int = 40) -> list:
+    if verdict.crash_index is None:
+        where = "after answering every input (at exit)"
+    else:
+        where = f"on input #{verdict.crash_index + 1}: {inputs[verdict.crash_index]}"
+    lines = [f"CRASH: candidate {verdict.crash_reason} {where}"]
+    log = verdict.crash_log.strip().split("\n")
+    if log != [""]:
+        lines.append(f"  last {min(len(log), log_lines)} lines of its error output:")
+        lines += ["    " + line for line in log[-log_lines:]]
+    return lines
+
+
 def report(verdict: Verdict, inputs: list, max_examples: int = 10) -> str:
     if verdict.status == "pass":
         return f"PASS: {verdict.checks} checks, no differences from the baseline"
+    if verdict.status == "crash":
+        lines = _crash_report(verdict, inputs)
+        if verdict.mismatches:
+            lines += ["", "Before stopping, it also answered differently:"]
+            lines += _difference_report(verdict, inputs, max_examples)
+        return "\n".join(lines)
+    return "\n".join(_difference_report(verdict, inputs, max_examples))
 
+
+def _difference_report(verdict: Verdict, inputs: list, max_examples: int) -> list:
     by_input = {}
     for m in verdict.mismatches:
         by_input.setdefault(m.index, []).append(m)
@@ -95,4 +138,4 @@ def report(verdict: Verdict, inputs: list, max_examples: int = 10) -> str:
         lines.append(f"    config {first.config}" + (f" (also {', '.join(m.config for m in rest)})" if rest else ""))
         lines.append(f"      baseline:  {_answer(first.old)}")
         lines.append(f"      candidate: {_answer(first.new)}")
-    return "\n".join(lines)
+    return lines

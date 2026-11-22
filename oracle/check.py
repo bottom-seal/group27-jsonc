@@ -11,6 +11,7 @@ Usage: python3 oracle/check.py [CANDIDATE]
 Exit codes:
   0  pass: the candidate answers exactly like the baseline
   1  different: some answer differs
+  2  crash: the candidate crashed, hung, or a sanitizer reported an error
   4  internal error: the checker itself could not run (e.g. baseline broken)
 
 Needs gcc, cmake and git on PATH (or set CC / CMAKE).
@@ -35,7 +36,7 @@ CMAKE = os.environ.get("CMAKE", "cmake")
 SANITIZE = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
             "-fno-omit-frame-pointer", "-g", "-O1"]
 
-EXIT_PASS, EXIT_DIFFERENT, EXIT_INTERNAL = 0, 1, 4
+EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_INTERNAL = 0, 1, 2, 4
 
 
 class CheckerError(Exception):
@@ -95,32 +96,25 @@ class Baseline:
 
     def compile_tokener(self, source: Path, obj: Path) -> subprocess.CompletedProcess:
         """Compile a json_tokener.c with exactly the flags cmake uses for the
-        baseline one. The source is copied next to the baseline sources, so its
-        #include "..." lines resolve to the baseline headers."""
+        baseline one. The source is copied into its own folder under its real
+        name, so compiler messages point at json_tokener.c lines, and its
+        #include "..." lines fall through to the baseline headers via -I."""
         entry = json.loads(self.tokener_cmd.read_text())
         args = entry.get("arguments") or shlex.split(entry["command"])
-        placed = self.src / f".candidate-{os.getpid()}-{obj.stem}.c"
+        placed = obj.parent / f"{obj.stem}-src" / "json_tokener.c"
+        placed.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(source, placed)
-        try:
-            cmd = []
-            skip = False
-            for arg in args:
-                if skip:
-                    skip = False
-                    continue
-                if arg == "-o":
-                    cmd += ["-o", str(obj)]
-                    skip = True
-                elif arg == "-c":
-                    continue
-                elif Path(arg).name == "json_tokener.c":
-                    continue
-                else:
-                    cmd.append(arg)
-            cmd += ["-c", str(placed)]
-            return sh(cmd, cwd=entry["directory"])
-        finally:
-            placed.unlink(missing_ok=True)
+        cmd = []
+        skip = False
+        for arg in args:
+            if skip:
+                skip = False
+            elif arg == "-o":
+                cmd += ["-o", str(obj)]
+                skip = True
+            elif arg != "-c" and Path(arg).name != "json_tokener.c":
+                cmd.append(arg)
+        return sh(cmd + ["-c", str(placed)], cwd=entry["directory"])
 
     def link(self, tokener_obj: Path, recorder_obj: Path, out: Path):
         return sh([CC, *SANITIZE, str(recorder_obj), str(tokener_obj), str(self.rest_lib), "-lm", "-o", str(out)])
@@ -166,8 +160,9 @@ def main(argv=None) -> int:
             must_ok = baseline.compile_tokener(baseline.src / "json_tokener.c", tmp / "old.o")
             if must_ok.returncode != 0:
                 raise CheckerError("baseline json_tokener.c does not compile:\n" + must_ok.stderr)
-            if baseline.link(tmp / "old.o", tmp / "recorder.o", tmp / "old").returncode != 0:
-                raise CheckerError("baseline does not link")
+            linked = baseline.link(tmp / "old.o", tmp / "recorder.o", tmp / "old")
+            if linked.returncode != 0:
+                raise CheckerError("baseline does not link:\n" + linked.stderr)
 
             baseline.compile_tokener(Path(args.candidate), tmp / "new.o")
             baseline.link(tmp / "new.o", tmp / "recorder.o", tmp / "new")
@@ -182,7 +177,7 @@ def main(argv=None) -> int:
 
     verdict = compare(old, new)
     print(report(verdict, inputs))
-    return EXIT_PASS if verdict.status == "pass" else EXIT_DIFFERENT
+    return {"pass": EXIT_PASS, "different": EXIT_DIFFERENT, "crash": EXIT_CRASH}[verdict.status]
 
 
 if __name__ == "__main__":

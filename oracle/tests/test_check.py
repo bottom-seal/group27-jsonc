@@ -59,3 +59,19 @@ def test_fixing_a_known_bug_counts_as_a_difference(tmp_path):
     assert "FAIL" in result.stdout
     assert "{'a':0}" in result.stdout  # the report names a differing input
     assert "strict" in result.stdout  # ... and the config it differed under
+
+
+PARSE_EX_START = "\tstruct json_object *obj = NULL;\n\tchar c = '\\1';\n"
+
+
+def test_crash_is_reported_with_the_input_it_crashed_on(tmp_path):
+    crashing = candidate(
+        tmp_path,
+        PARSE_EX_START,
+        PARSE_EX_START + "\tif (len >= 2 && str[0] == '[' && str[1] == ']')\n"
+                         "\t\t*(volatile int *)0 = 1; /* planted crash */\n",
+    )
+    result = run_check(crashing)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "CRASH" in result.stdout
+    assert "input #50: []" in result.stdout  # first "[]" in oracle/inputs/core.txt
