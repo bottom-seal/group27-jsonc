@@ -84,3 +84,23 @@ def test_candidate_that_does_not_compile_is_a_build_error(tmp_path):
     assert "BUILD ERROR" in result.stdout
     # The planted line is line 331; the message must point at it in the candidate file.
     assert f"{broken}:331" in result.stdout
+
+
+# Planted only for the input "[]", so the baseline-vs-candidate answers still match.
+ON_EMPTY_ARRAY = "\tif (len >= 2 && str[0] == '[' && str[1] == ']')\n"
+
+
+def test_hidden_memory_error_fails_even_when_answers_match(tmp_path):
+    overflow = candidate(
+        tmp_path,
+        PARSE_EX_START,
+        PARSE_EX_START + ON_EMPTY_ARRAY
+        # volatile index: the compiler cannot see the overflow, only ASan can
+        + "\t{ char *p = calloc(1, 4); volatile int i = 4; volatile char x = p[i]; (void)x; free(p); }\n",
+    )
+    result = run_check(overflow)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "input #50: []" in result.stdout
+    # The sanitizer report points at the planted line, in the candidate's own file.
+    assert f"{overflow}:332" in result.stdout
+

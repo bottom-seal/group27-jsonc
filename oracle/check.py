@@ -18,6 +18,7 @@ Exit codes:
 Needs gcc, cmake and git on PATH (or set CC / CMAKE).
 """
 import argparse
+import dataclasses
 import json
 import os
 import shlex
@@ -54,6 +55,12 @@ def must(cmd, **kw):
     if result.returncode != 0:
         raise CheckerError(f"command failed: {shlex.join(map(str, cmd))}\n{result.stdout}{result.stderr}")
     return result
+
+
+def placed_source(obj: Path) -> Path:
+    """Where a tokener source is copied before compiling it to obj. Compiler
+    and sanitizer messages name this path; reports swap it for the real one."""
+    return obj.parent / f"{obj.stem}-src" / "json_tokener.c"
 
 
 class Baseline:
@@ -102,7 +109,7 @@ class Baseline:
         #include "..." lines fall through to the baseline headers via -I."""
         entry = json.loads(self.tokener_cmd.read_text())
         args = entry.get("arguments") or shlex.split(entry["command"])
-        placed = obj.parent / f"{obj.stem}-src" / "json_tokener.c"
+        placed = placed_source(obj)
         placed.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(source, placed)
         cmd = []
@@ -153,7 +160,7 @@ def build(baseline: Baseline, source: Path, tmp: Path, name: str, max_lines: int
     if result.returncode == 0:
         return ""
     # Show the user's path, not the temporary copy the compiler saw.
-    text = (result.stdout + result.stderr).replace(str(obj.parent / f"{name}-src" / "json_tokener.c"), str(source))
+    text = (result.stdout + result.stderr).replace(str(placed_source(obj)), str(source))
     return "\n".join(text.strip().split("\n")[:max_lines])
 
 
@@ -184,6 +191,8 @@ def main(argv=None) -> int:
             if old.returncode != 0 or old.timed_out or not old.output.endswith("#done\n"):
                 raise CheckerError(f"baseline recorder failed (exit {old.returncode}):\n{old.stderr[-3000:]}")
             new = run_recorder(tmp / "new", inputs, args.timeout)
+            # Sanitizer reports should name the candidate file, not the temporary copy.
+            new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))
     except CheckerError as e:
         print(f"CHECKER ERROR: {e}")
         return EXIT_INTERNAL
