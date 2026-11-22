@@ -104,3 +104,18 @@ def test_hidden_memory_error_fails_even_when_answers_match(tmp_path):
     # The sanitizer report points at the planted line, in the candidate's own file.
     assert f"{overflow}:332" in result.stdout
 
+
+def test_memory_leak_fails(tmp_path):
+    leak = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + "\t{ void *volatile leaked = malloc(16); (void)leaked; }\n")
+    result = run_check(leak)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "LeakSanitizer" in result.stdout
+    assert "at exit" in result.stdout  # leaks are only reported once all inputs are answered
+
+
+def test_endless_loop_fails_as_a_timeout(tmp_path):
+    hang = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + "\t\tfor (;;) {}\n")
+    result = run_check(hang, "--timeout", "10")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "timed out" in result.stdout
+    assert "input #50: []" in result.stdout
