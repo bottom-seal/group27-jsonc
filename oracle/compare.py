@@ -93,16 +93,36 @@ def _counts(counter: Counter) -> str:
     return ", ".join(f"{key} {n}" for key, n in counter.most_common())
 
 
+def _log_excerpt(log: str, max_lines: int) -> list:
+    """The useful part of a crash log. Sanitizer reports start with a headline
+    ("ERROR: AddressSanitizer: ..." or "... runtime error: ...") and end with a
+    hex dump of memory ("Shadow bytes around ..."); keep the headline and stack,
+    drop the dump. Without a sanitizer headline, keep the last lines."""
+    lines = log.strip().split("\n")
+    if lines == [""]:
+        return []
+    start = next((i for i, line in enumerate(lines)
+                  if "runtime error:" in line or ("ERROR:" in line and "Sanitizer" in line)), None)
+    if start is None:
+        return lines[-max_lines:]
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("Shadow bytes")), len(lines))
+    excerpt = lines[start:end]
+    if len(excerpt) > max_lines:
+        summary = [line for line in excerpt if line.startswith("SUMMARY:")]
+        excerpt = excerpt[:max_lines - len(summary) - 1] + ["..."] + summary
+    return excerpt
+
+
 def _crash_report(verdict: Verdict, inputs: list, log_lines: int = 40) -> list:
     if verdict.crash_index is None:
         where = "after answering every input (at exit)"
     else:
         where = f"on input #{verdict.crash_index + 1}: {inputs[verdict.crash_index]}"
     lines = [f"CRASH: candidate {verdict.crash_reason} {where}"]
-    log = verdict.crash_log.strip().split("\n")
-    if log != [""]:
-        lines.append(f"  last {min(len(log), log_lines)} lines of its error output:")
-        lines += ["    " + line for line in log[-log_lines:]]
+    excerpt = _log_excerpt(verdict.crash_log, log_lines)
+    if excerpt:
+        lines.append("  its error output:")
+        lines += ["    " + line for line in excerpt]
     return lines
 
 
