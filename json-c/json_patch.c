@@ -1,0 +1,446 @@
+/*
+ * Copyright (c) 2021 Alexandru Ardelean.
+ * Copyright (c) 2023 Eric Hawicz
+ *
+ * This is free software; you can redistribute it and/or modify
+ * it under the terms of the MIT license. See COPYING for details.
+ */
+
+#include "config.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+#include "json_patch.h"
+#include "json_object_private.h"
+#include "json_pointer_private.h"
+#include "linkhash.h"
+
+#include <limits.h>
+#ifndef SIZE_T_MAX
+#if SIZEOF_SIZE_T == SIZEOF_INT
+#define SIZE_T_MAX UINT_MAX
+#elif SIZEOF_SIZE_T == SIZEOF_LONG
+#define SIZE_T_MAX ULONG_MAX
+#elif SIZEOF_SIZE_T == SIZEOF_LONG_LONG
+#define SIZE_T_MAX ULLONG_MAX
+#else
+#error Unable to determine size of size_t
+#endif
+#endif
+
+#define _set_err(_errval, _errmsg) do { \
+	patch_error->errno_code = (_errval); \
+	patch_error->errmsg = (_errmsg); \
+	errno = 0;  /* To avoid confusion */ \
+} while (0)
+
+#define _set_err_from_ptrget(_errval, _fieldname) do { \
+	patch_error->errno_code = (_errval); \
+	patch_error->errmsg = (_errval) == ENOENT ? \
+		"Did not find element referenced by " _fieldname " field" : \
+		"Invalid " _fieldname " field"; \
+	errno = 0;  /* To avoid confusion */ \
+} while(0)
+
+/**
+ * JavaScript Object Notation (JSON) Patch
+ *   RFC 6902 - https://tools.ietf.org/html/rfc6902
+ */
+
+/* RFC 6902 compares numbers by value, including inside arrays and objects.
+ * json_object_equal() deliberately distinguishes integer and double objects.
+ */
+static int json_patch_equal(struct json_object *a, struct json_object *b)
+{
+	enum json_type type_a = json_object_get_type(a);
+	enum json_type type_b = json_object_get_type(b);
+
+	if (a == b)
+		return 1;
+
+	if ((type_a == json_type_int && type_b == json_type_double) ||
+	    (type_a == json_type_double && type_b == json_type_int))
+	{
+		struct json_object *integer = type_a == json_type_int ? a : b;
+		struct json_object *floating = type_a == json_type_double ? a : b;
+		double d = json_object_get_double(floating);
+		int64_t i = json_object_get_int64(integer);
+		uint64_t u;
+
+		/* Check the range before casting, then reject fractional values and
+		 * integers that would lose precision when converted to double.
+		 */
+		if (i < 0)
+			return d >= (double)INT64_MIN && d < 0 && (int64_t)d == i && (double)i == d;
+
+		u = json_object_get_uint64(integer);
+		/* As in json_object_get_uint64(), the rounded upper bound is exclusive. */
+		return d >= 0 && d < (double)UINT64_MAX && (uint64_t)d == u && (double)u == d;
+	}
+
+	if (type_a != type_b)
+		return 0;
+
+	if (type_a == json_type_array)
+	{
+		size_t i, len = json_object_array_length(a);
+		if (len != json_object_array_length(b))
+			return 0;
+		for (i = 0; i < len; i++)
+		{
+			if (!json_patch_equal(json_object_array_get_idx(a, i),
+			                      json_object_array_get_idx(b, i)))
+				return 0;
+		}
+		return 1;
+	}
+
+	if (type_a == json_type_object)
+	{
+		struct json_object_iter iter;
+		struct json_object *value;
+		if (json_object_object_length(a) != json_object_object_length(b))
+			return 0;
+		json_object_object_foreachC(a, iter)
+		{
+			if (!json_object_object_get_ex(b, iter.key, &value) ||
+			    !json_patch_equal(iter.val, value))
+				return 0;
+		}
+		return 1;
+	}
+
+	return json_object_equal(a, b);
+}
+
+static int json_patch_apply_test(struct json_object **res,
+                                 struct json_object *patch_elem,
+                                 const char *path, struct json_patch_error *patch_error)
+{
+	struct json_object *value1, *value2;
+
+	if (!json_object_object_get_ex(patch_elem, "value", &value1)) {
+		_set_err(EINVAL, "Patch object does not contain a 'value' field");
+		return -1;
+	}
+
+	if (json_pointer_get(*res, path, &value2))
+	{
+		_set_err_from_ptrget(errno, "path");
+		return -1;
+	}
+
+	if (!json_patch_equal(value1, value2)) {
+		_set_err(ENOENT, "Value of element referenced by 'path' field did not match 'value' field");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int __json_patch_apply_remove(struct json_pointer_get_result *jpres)
+{
+	if (json_object_is_type(jpres->parent, json_type_array)) {
+		return json_object_array_del_idx(jpres->parent, jpres->index_in_parent, 1);
+	} else if (jpres->parent && jpres->key_in_parent) {
+		json_object_object_del(jpres->parent, jpres->key_in_parent);
+		return 0;
+	} else {
+		// We're removing the root object
+		(void)json_object_put(jpres->obj);
+		jpres->obj = NULL;
+		return 0;
+	}
+}
+
+static int json_patch_apply_remove(struct json_object **res, const char *path, struct json_patch_error *patch_error)
+{
+	struct json_pointer_get_result jpres;
+	int rc;
+
+	if (json_pointer_get_internal(*res, path, &jpres))
+	{
+		_set_err_from_ptrget(errno, "path");
+		return -1;
+	}
+
+	rc = __json_patch_apply_remove(&jpres);
+	if (rc < 0)
+		_set_err(EINVAL, "Unable to remove path referenced by 'path' field");
+	// This means we removed and freed the root object, i.e. *res
+	if (jpres.parent == NULL)
+		*res = NULL;
+	return rc;
+}
+
+// callback for json_pointer_set_with_cb()
+// key is ignored because this callback is only for arrays
+static int json_object_array_insert_idx_cb(struct json_object *parent, const char *key, size_t idx,
+                                           struct json_object *value, void *priv)
+{
+	int rc;
+	int *add = priv;
+
+	if (idx > json_object_array_length(parent))
+	{
+		// Note: will propagate back out through json_pointer_set_with_cb()
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (*add)
+		rc = json_object_array_insert_idx(parent, idx, value);
+	else
+		rc = json_object_array_put_idx(parent, idx, value);
+	if (rc < 0)
+		errno = EINVAL;
+	return rc;
+}
+
+static int json_patch_apply_add_replace(struct json_object **res,
+                                        struct json_object *patch_elem,
+                                        const char *path, int add, struct json_patch_error *patch_error)
+{
+	struct json_object *value;
+	int rc;
+
+	if (!json_object_object_get_ex(patch_elem, "value", &value)) {
+		_set_err(EINVAL, "Patch object does not contain a 'value' field");
+		return -1;
+	}
+	/* if this is a replace op, then we need to make sure it exists before replacing */
+	if (!add && json_pointer_get(*res, path, NULL)) {
+		_set_err_from_ptrget(errno, "path");
+		return -1;
+	}
+
+	rc = json_pointer_set_with_cb(res, path, json_object_get(value),
+					    json_object_array_insert_idx_cb, 0, &add);
+	if (rc)
+	{
+		_set_err(errno, "Failed to set value at path referenced by 'path' field");
+		json_object_put(value);
+	}
+
+	return rc;
+}
+
+// callback for json_pointer_set_with_cb()
+// key is ignored because this callback is only for arrays
+static int json_object_array_move_cb(struct json_object *parent, const char *key, size_t idx,
+                                     struct json_object *value, void *priv)
+{
+	int rc;
+
+	/**
+	 * When moving within the same array, the element has already been
+	 * removed, and idx refers to the shorter array (RFC 6902 section 4.4)
+	 */
+	if (idx > json_object_array_length(parent))
+	{
+		// Note: will propagate back out through json_pointer_set_with_cb()
+		errno = EINVAL;
+		return -1;
+	}
+
+	rc = json_object_array_insert_idx(parent, idx, value);
+	if (rc < 0)
+		errno = EINVAL;
+	return rc;
+}
+
+static int json_patch_apply_move_copy(struct json_object **res,
+                                      struct json_object *patch_elem,
+                                      const char *path, int move, struct json_patch_error *patch_error)
+{
+	json_pointer_set_cb array_set_cb;
+	void *array_set_priv;
+	struct json_pointer_get_result from;
+	struct json_object *jfrom;
+	struct json_object *value;
+	const char *from_s;
+	size_t from_s_len;
+	int add = 1;
+	int rc;
+
+	if (!json_object_object_get_ex(patch_elem, "from", &jfrom)) {
+		_set_err(EINVAL, "Patch does not contain a 'from' field");
+		return -1;
+	}
+
+	from_s = json_object_get_type(jfrom) == json_type_string ? json_object_get_string(jfrom) : NULL;
+	if (from_s == NULL) {
+		_set_err(EINVAL, "Patch object 'from' field is not a string");
+		return -1;
+	}
+
+	from_s_len = strlen(from_s);
+	/**
+	 * "from" is only a (possibly improper) prefix of "path" when the
+	 * shared run of characters ends on a reference-token boundary in
+	 * "path", i.e. the next character is '/' or the strings end there.
+	 * Without the boundary check, "from" being a plain string prefix of
+	 * "path" (e.g. "/aa" and "/aab") was mistaken for "from" being an
+	 * ancestor pointer of "path", rejecting moves/copies between mere
+	 * sibling keys that happen to share a name prefix.
+	 *
+	 * This only restricts "move". A "copy" is an "add" of a deep copy of
+	 * the "from" value (RFC 6902 section 4.5), so copying a location into
+	 * one of its children, or onto itself (which inserts a duplicate when
+	 * "path" is an array index), is allowed.
+	 */
+	if (move && strncmp(from_s, path, from_s_len) == 0 &&
+	    (from_s_len == 0 || path[from_s_len] == '\0' || path[from_s_len] == '/')) {
+		/**
+		 * If lengths match, it's a noop, if they don't,
+		 * then we're trying to move a parent under a child
+		 * which is not allowed as per RFC 6902 section 4.4
+		 *   The "from" location MUST NOT be a proper prefix of the "path"
+		 *   location; i.e., a location cannot be moved into one of its children.
+		 */
+		if (path[from_s_len] == '\0')
+			return 0;
+		_set_err(EINVAL, "Invalid attempt to move parent under a child");
+		return -1;
+	}
+
+	rc = json_pointer_get_internal(*res, from_s, &from);
+	if (rc)
+	{
+		_set_err_from_ptrget(errno, "from");
+		return rc;
+	}
+
+	// Note: for "move" it's impossible for json_pointer to find the root
+	// obj, due to the path check above, so from.parent is guaranteed
+	// non-NULL there. "copy" may read the root, but never removes it.
+
+	if (!move) {
+		/* RFC 6902 section 4.5: "copy" duplicates the value, it does
+		 * not share it.  Sharing the source via a reference (as a plain
+		 * json_object_get() would) lets a later op insert the value
+		 * beneath itself through a different pointer path, which the
+		 * from/path string check above can't detect because both paths
+		 * resolve to the same object, producing a reference cycle that
+		 * loops forever on serialisation and breaks teardown.  An
+		 * independent deep copy can never alias an existing node. */
+		value = NULL;
+		if (from.obj != NULL &&
+		    json_object_deep_copy(from.obj, &value, NULL) < 0) {
+			_set_err(ENOMEM, "Unable to copy value referenced by 'from' field");
+			return -1;
+		}
+		/* copy is an "add" at the target, and json_object_array_insert_idx_cb()
+		 * reads its priv as the int add flag, not as the "from" result */
+		array_set_cb = json_object_array_insert_idx_cb;
+		array_set_priv = &add;
+	} else {
+		json_object_get(from.obj);
+		value = from.obj;
+		rc = __json_patch_apply_remove(&from);
+		if (rc < 0) {
+			json_object_put(value);
+			return rc;
+		}
+		array_set_cb = json_object_array_move_cb;
+		array_set_priv = &from;
+	}
+
+	rc = json_pointer_set_with_cb(res, path, value, array_set_cb, 0, array_set_priv);
+	if (rc)
+	{
+		_set_err(errno, "Failed to set value at path referenced by 'path' field");
+		json_object_put(value);
+	}
+
+	return rc;
+}
+
+int json_patch_apply(struct json_object *copy_from, struct json_object *patch,
+                     struct json_object **base, struct json_patch_error *patch_error)
+{
+	size_t ii;
+	int rc = 0;
+	struct json_patch_error placeholder;
+
+	if (!patch_error)
+		patch_error = &placeholder;
+
+	patch_error->patch_failure_idx = SIZE_T_MAX;
+	patch_error->errno_code = 0;
+
+	if (base == NULL|| 
+	    (*base == NULL && copy_from == NULL) ||
+	    (*base != NULL && copy_from != NULL))
+	{
+		_set_err(EFAULT, "Exactly one of *base or copy_from must be non-NULL");
+		return -1;
+	}
+	    
+	if (!json_object_is_type(patch, json_type_array)) {
+		_set_err(EFAULT, "Patch object is not of type json_type_array");
+		return -1;
+	}
+
+	if (copy_from != NULL)
+	{
+		if (json_object_deep_copy(copy_from, base, NULL) < 0)
+		{
+			_set_err(ENOMEM, "Unable to copy copy_from using json_object_deep_copy()");
+			return -1;
+		}
+	}
+
+	/* Go through all operations ; apply them on res */
+	for (ii = 0; ii < json_object_array_length(patch); ii++) {
+		struct json_object *jop, *jpath;
+		struct json_object *patch_elem = json_object_array_get_idx(patch, ii);
+		const char *op, *path;
+
+		patch_error->patch_failure_idx = ii;
+
+		if (!json_object_object_get_ex(patch_elem, "op", &jop)) {
+			_set_err(EINVAL, "Patch object does not contain 'op' field");
+			return -1;
+		}
+		op = json_object_get_type(jop) == json_type_string ? json_object_get_string(jop) : NULL;
+		if (op == NULL) {
+			_set_err(EINVAL, "Patch object 'op' field is not a string");
+			return -1;
+		}
+		if (!json_object_object_get_ex(patch_elem, "path", &jpath)) {
+			_set_err(EINVAL, "Patch object does not contain 'path' field");
+			return -1;
+		}
+		// Note: empty string is ok!
+		path = json_object_get_type(jpath) == json_type_string ? json_object_get_string(jpath)
+		                                                       : NULL;
+		if (path == NULL) {
+			_set_err(EINVAL, "Patch object 'path' field is not a string");
+			return -1;
+		}
+
+		if (!strcmp(op, "test"))
+			rc = json_patch_apply_test(base, patch_elem, path, patch_error);
+		else if (!strcmp(op, "remove"))
+			rc = json_patch_apply_remove(base, path, patch_error);
+		else if (!strcmp(op, "add"))
+			rc = json_patch_apply_add_replace(base, patch_elem, path, 1, patch_error);
+		else if (!strcmp(op, "replace"))
+			rc = json_patch_apply_add_replace(base, patch_elem, path, 0, patch_error);
+		else if (!strcmp(op, "move"))
+			rc = json_patch_apply_move_copy(base, patch_elem, path, 1, patch_error);
+		else if (!strcmp(op, "copy"))
+			rc = json_patch_apply_move_copy(base, patch_elem, path, 0, patch_error);
+		else {
+			_set_err(EINVAL, "Patch object has invalid 'op' field");
+			return -1;
+		}
+		if (rc < 0)
+			break;
+	}
+
+	return rc;
+}
