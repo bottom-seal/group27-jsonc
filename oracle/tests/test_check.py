@@ -201,3 +201,51 @@ def test_exiting_normally_partway_is_a_crash(tmp_path):
     result = run_check(quits)
     assert result.returncode == 2, result.stdout + result.stderr
     assert "stopped before the last input on input #50: []" in result.stdout
+
+
+# Mistakes in the other ways programs call the tokener. The recorder used to
+# call only json_tokener_parse_ex(tok, buf, len + 1) on a fresh tokener, so
+# all of these passed. Each entry: (text to replace, replacement, exit code).
+DIFFERENT, CRASH = 1, 2
+API_MISTAKES = {
+    "parse_ex rejects len == -1 (used by json_tokener_parse)": (
+        "if ((len < -1) || (len == -1 && strlen(str) > INT32_MAX))",
+        "if ((len <= -1) || (len == -1 && strlen(str) > INT32_MAX))",
+        DIFFERENT,
+    ),
+    "input without a final NUL ends with an error instead of 'continue'": (
+        "(((tok)->err = json_tokener_continue), 0))",
+        "(((tok)->err = json_tokener_error_parse_eof), 0))",
+        DIFFERENT,
+    ),
+    # The per-level stack is sized by the depth given, so a larger max_depth
+    # overruns it: ASan reports it on the first nested input.
+    "json_tokener_new_ex ignores its depth": (
+        "\ttok->max_depth = depth;",
+        "\ttok->max_depth = JSON_TOKENER_DEFAULT_DEPTH;",
+        CRASH,
+    ),
+    "json_tokener_new_ex caps depth at the default": (
+        "\ttok->max_depth = depth;",
+        "\ttok->max_depth = depth < JSON_TOKENER_DEFAULT_DEPTH ? depth : JSON_TOKENER_DEFAULT_DEPTH;",
+        DIFFERENT,
+    ),
+    # Levels above the stale depth are never freed: LeakSanitizer reports it.
+    "json_tokener_reset forgets the nesting level": (
+        "\ttok->depth = 0;\n\ttok->err = json_tokener_success;\n\ttok->high_surrogate = 0;\n}",
+        "\ttok->err = json_tokener_success;\n\ttok->high_surrogate = 0;\n}",
+        CRASH,
+    ),
+    "json_tokener_parse drops its result": (
+        "obj = json_tokener_parse_verbose(str, &jerr_ignored);\n\treturn obj;",
+        "obj = json_tokener_parse_verbose(str, &jerr_ignored);\n\tjson_object_put(obj);\n\treturn NULL;",
+        DIFFERENT,
+    ),
+}
+
+
+@pytest.mark.parametrize("mistake", sorted(API_MISTAKES))
+def test_mistakes_in_other_entry_points_are_caught(tmp_path, mistake):
+    old, new, expected = API_MISTAKES[mistake]
+    result = run_check(candidate(tmp_path, old, new))
+    assert result.returncode == expected, result.stdout + result.stderr

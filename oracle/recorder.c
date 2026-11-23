@@ -7,8 +7,8 @@
  *
  * Usage: recorder ANSWERS_FILE < inputs
  *
- * Output (ANSWERS_FILE): for every input and every config, one tab-separated
- * record
+ * Output (ANSWERS_FILE): for every input and every way of asking the tokener
+ * (see record_input), one tab-separated record
  *
  *     <input index> <config> <type signature> <error> <parse end> <value>
  *
@@ -107,27 +107,96 @@ static size_t decode_line(const char *line, size_t len, char *buf)
 	return n;
 }
 
-static void record_oneshot(size_t index, const struct config *cfg, const char *buf, size_t n)
+/* One answer line. err < 0 or end < 0 print "-": json_tokener_parse() has
+ * no tokener to ask. Takes ownership of obj. */
+static void write_answer(size_t index, const char *mode, const char *flags, json_object *obj,
+                         int err, long end)
 {
-	json_tokener *tok = json_tokener_new();
+	fprintf(out, "%zu\t%s%s%s\t", index, mode, flags ? "/" : "", flags ? flags : "");
+	print_signature(obj);
+	if (err < 0)
+		fputs("\t-", out);
+	else
+		fprintf(out, "\t%d %s", err, json_tokener_error_desc((enum json_tokener_error)err));
+	if (end < 0)
+		fputs("\t-", out);
+	else
+		fprintf(out, "\t%ld", end);
+	fprintf(out, "\t%s\n", obj ? json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN) : "-");
+	json_object_put(obj);
+}
+
+static json_tokener *new_tokener(int depth, int flags)
+{
+	json_tokener *tok = depth ? json_tokener_new_ex(depth) : json_tokener_new();
 	if (!tok)
 	{
-		fprintf(stderr, "recorder: json_tokener_new failed\n");
+		fprintf(stderr, "recorder: could not create a tokener (depth %d)\n", depth);
 		exit(3);
 	}
-	json_tokener_set_flags(tok, cfg->flags);
-	/* n + 1: include the terminating NUL so the tokener sees end of input */
-	json_object *obj = json_tokener_parse_ex(tok, buf, (int)n + 1);
-	enum json_tokener_error err = json_tokener_get_error(tok);
+	json_tokener_set_flags(tok, flags);
+	return tok;
+}
 
-	fprintf(out, "%zu\t%s\t", index, cfg->name);
-	print_signature(obj);
-	fprintf(out, "\t%d %s\t%zu\t%s\n", (int)err, json_tokener_error_desc(err),
-	        json_tokener_get_parse_end(tok),
-	        obj ? json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN) : "-");
+/* Parse buf[0..len) on tok and record the answer. */
+static void parse_and_record(size_t index, const char *mode, const char *flags_name,
+                             json_tokener *tok, const char *buf, int len)
+{
+	json_object *obj = json_tokener_parse_ex(tok, buf, len);
+	write_answer(index, mode, flags_name, obj, (int)json_tokener_get_error(tok),
+	             (long)json_tokener_get_parse_end(tok));
+}
 
-	json_object_put(obj);
-	json_tokener_free(tok);
+/* Tokeners kept across all inputs, reset after each: checks json_tokener_reset. */
+static json_tokener *reused[NCONFIGS];
+
+static const int DEPTHS[] = {1, 5, 64}; /* json_tokener_new_ex; the default is 32 */
+#define NDEPTHS (sizeof(DEPTHS) / sizeof(DEPTHS[0]))
+
+/* Every way the recorder asks the tokener about one input. buf holds n bytes
+ * followed by a NUL. */
+static void record_input(size_t index, const char *buf, size_t n)
+{
+	for (size_t c = 0; c < NCONFIGS; c++)
+	{
+		const char *name = CONFIGS[c].name;
+		int flags = CONFIGS[c].flags;
+		json_tokener *tok;
+
+		/* oneshot: the whole input plus its NUL, so the tokener sees the end */
+		tok = new_tokener(0, flags);
+		parse_and_record(index, "oneshot", name, tok, buf, (int)n + 1);
+		json_tokener_free(tok);
+
+		/* noterm: no NUL, as when a caller passes exactly the bytes it has */
+		tok = new_tokener(0, flags);
+		parse_and_record(index, "noterm", name, tok, buf, (int)n);
+		json_tokener_free(tok);
+
+		/* minus1: len -1 means "use strlen", which json_tokener_parse() relies on */
+		tok = new_tokener(0, flags);
+		parse_and_record(index, "minus1", name, tok, buf, -1);
+		json_tokener_free(tok);
+
+		/* reuse: one tokener for all inputs, reset after each */
+		parse_and_record(index, "reuse", name, reused[c], buf, (int)n + 1);
+		json_tokener_reset(reused[c]);
+	}
+
+	write_answer(index, "parse", NULL, json_tokener_parse(buf), -1, -1);
+
+	enum json_tokener_error err = json_tokener_success;
+	json_object *obj = json_tokener_parse_verbose(buf, &err);
+	write_answer(index, "verbose", NULL, obj, (int)err, -1);
+
+	for (size_t d = 0; d < NDEPTHS; d++)
+	{
+		char mode[16];
+		snprintf(mode, sizeof mode, "depth%d", DEPTHS[d]);
+		json_tokener *tok = new_tokener(DEPTHS[d], 0);
+		parse_and_record(index, mode, NULL, tok, buf, (int)n + 1);
+		json_tokener_free(tok);
+	}
 }
 
 int main(int argc, char **argv)
@@ -138,16 +207,19 @@ int main(int argc, char **argv)
 		return 3;
 	}
 	static char line[1 << 17], buf[1 << 17];
+	for (size_t c = 0; c < NCONFIGS; c++)
+		reused[c] = new_tokener(0, CONFIGS[c].flags);
 	size_t index = 0;
 	while (fgets(line, sizeof line, stdin))
 	{
 		size_t len = strcspn(line, "\n");
 		size_t n = decode_line(line, len, buf);
-		for (size_t c = 0; c < NCONFIGS; c++)
-			record_oneshot(index, &CONFIGS[c], buf, n);
+		record_input(index, buf, n);
 		fflush(out);
 		index++;
 	}
+	for (size_t c = 0; c < NCONFIGS; c++)
+		json_tokener_free(reused[c]);
 	fprintf(out, "#done %zu\n", index);
 	return fclose(out) == 0 ? 0 : 3;
 }
