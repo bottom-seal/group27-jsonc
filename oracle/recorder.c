@@ -21,6 +21,7 @@
  *
  * Adapted from bughunt/mutation/mut_driver.c.
  */
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,15 +90,22 @@ static void print_signature(json_object *o)
 	}
 }
 
+static int hex_value(char c)
+{
+	return isdigit((unsigned char)c) ? c - '0' : tolower((unsigned char)c) - 'a' + 10;
+}
+
+/* Decode "\xNN" (exactly two hex digits) into one byte; everything else is
+ * copied. check.py rejects input files with any other "\x". */
 static size_t decode_line(const char *line, size_t len, char *buf)
 {
 	size_t n = 0;
 	for (size_t i = 0; i < len; i++)
 	{
-		unsigned v;
-		if (line[i] == '\\' && line[i + 1] == 'x' && sscanf(line + i + 2, "%2x", &v) == 1)
+		if (i + 3 < len && line[i] == '\\' && line[i + 1] == 'x' &&
+		    isxdigit((unsigned char)line[i + 2]) && isxdigit((unsigned char)line[i + 3]))
 		{
-			buf[n++] = (char)v;
+			buf[n++] = (char)(hex_value(line[i + 2]) * 16 + hex_value(line[i + 3]));
 			i += 3;
 		}
 		else
@@ -206,18 +214,31 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: recorder ANSWERS_FILE < inputs\n");
 		return 3;
 	}
-	static char line[1 << 17], buf[1 << 17];
 	for (size_t c = 0; c < NCONFIGS; c++)
 		reused[c] = new_tokener(0, CONFIGS[c].flags);
+	char *line = NULL;
+	size_t cap = 0;
+	ssize_t got;
 	size_t index = 0;
-	while (fgets(line, sizeof line, stdin))
+	/* getline: any length; the line may contain raw NUL bytes */
+	while ((got = getline(&line, &cap, stdin)) != -1)
 	{
-		size_t len = strcspn(line, "\n");
+		size_t len = (size_t)got;
+		if (len > 0 && line[len - 1] == '\n')
+			len--;
+		char *buf = malloc(len + 1);
+		if (!buf)
+		{
+			fprintf(stderr, "recorder: out of memory\n");
+			return 3;
+		}
 		size_t n = decode_line(line, len, buf);
 		record_input(index, buf, n);
+		free(buf);
 		fflush(out);
 		index++;
 	}
+	free(line);
 	for (size_t c = 0; c < NCONFIGS; c++)
 		json_tokener_free(reused[c]);
 	fprintf(out, "#done %zu\n", index);

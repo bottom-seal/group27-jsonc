@@ -23,6 +23,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -30,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -58,6 +60,8 @@ BASELINE_TREE = "6471b8bea91c872deb52fc74badcb8889bcddbaa"
 CMAKE_ARGS = ["-DBUILD_SHARED_LIBS=OFF", "-DBUILD_TESTING=OFF", "-DCMAKE_BUILD_TYPE=Debug",
               "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
 CACHE_FORMAT = 2  # bump when the cached build's layout or recipe changes
+
+BAD_ESCAPE = re.compile(r"\\x(?![0-9A-Fa-f]{2})")
 
 BASELINE_TIME_LIMIT = 600  # seconds; the baseline takes a few
 COMMAND_TIME_LIMIT = 120  # seconds for one compile or link
@@ -186,10 +190,20 @@ class Baseline:
               "-c", str(ORACLE / "recorder.c"), "-o", str(out)])
 
 
-def load_inputs(paths):
+def load_inputs(paths) -> list:
+    """Input lines exactly as written: bytes read as latin-1 (no newline
+    translation), a last line without a final newline kept, and every "\\x"
+    followed by two hex digits."""
     lines = []
     for path in paths:
-        lines += Path(path).read_text(encoding="latin-1").split("\n")[:-1]
+        file_lines = Path(path).read_bytes().decode("latin-1").split("\n")
+        if file_lines[-1] == "":
+            file_lines.pop()
+        for number, line in enumerate(file_lines, 1):
+            if BAD_ESCAPE.search(line):
+                raise CheckerError(f"{path}:{number}: \\x must be followed by two hex digits"
+                                   " (write a literal backslash as \\x5c)")
+        lines += file_lines
     return lines
 
 
@@ -267,38 +281,46 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        baseline = Baseline(Path(args.build_dir))
-        inputs = load_inputs(args.inputs)
-        # Per-run files live outside the cache, so the candidate never runs
-        # next to it.
-        with tempfile.TemporaryDirectory(prefix="oracle-check-") as tmp:
-            tmp = Path(tmp)
-            baseline.compile_recorder(tmp / "recorder.o")
-
-            old_source = tmp / "baseline_json_tokener.c"
-            old_source.write_bytes(baseline_tokener_source())
-            problem = build(baseline, old_source, tmp, "old")
-            if problem:
-                raise CheckerError("the baseline does not build:\n" + problem)
-            problem = build(baseline, Path(args.candidate), tmp, "new")
-            if problem:
-                print(f"BUILD ERROR: the candidate {args.candidate} does not build\n{problem}")
-                return EXIT_BUILD
-
-            old = run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT)
-            base = parse_output(old.output)
-            if old.returncode != 0 or old.timed_out or base.problems or base.done != len(inputs):
-                raise CheckerError(
-                    f"baseline recorder failed (exit {old.returncode}, read {base.done} of {len(inputs)} inputs,"
-                    f" problems {base.problems[:3]}):\n{old.stderr[-3000:]}")
-            # The candidate must not be able to run the baseline in its place.
-            (tmp / "old").unlink()
-            new = run_recorder(tmp / "new", inputs, max(args.timeout, args.slowdown * old.elapsed))
-            # Sanitizer reports should name the candidate file, not the temporary copy.
-            new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))
+        return check(args)
     except CheckerError as e:
         print(f"CHECKER ERROR: {e}")
-        return EXIT_INTERNAL
+    except Exception:  # a bug in the checker must never look like a verdict
+        print("CHECKER ERROR: unexpected failure in the checker\n" + traceback.format_exc())
+    return EXIT_INTERNAL
+
+
+def check(args) -> int:
+    """Build both versions, run both recorders, compare. Returns the exit code."""
+    if not Path(args.candidate).is_file():
+        raise CheckerError(f"candidate {args.candidate} is not a file")
+    baseline = Baseline(Path(args.build_dir))
+    inputs = load_inputs(args.inputs)
+    # Per-run files live outside the cache, so the candidate never runs next to it.
+    with tempfile.TemporaryDirectory(prefix="oracle-check-") as tmp:
+        tmp = Path(tmp)
+        baseline.compile_recorder(tmp / "recorder.o")
+
+        old_source = tmp / "baseline_json_tokener.c"
+        old_source.write_bytes(baseline_tokener_source())
+        problem = build(baseline, old_source, tmp, "old")
+        if problem:
+            raise CheckerError("the baseline does not build:\n" + problem)
+        problem = build(baseline, Path(args.candidate), tmp, "new")
+        if problem:
+            print(f"BUILD ERROR: the candidate {args.candidate} does not build\n{problem}")
+            return EXIT_BUILD
+
+        old = run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT)
+        base = parse_output(old.output)
+        if old.returncode != 0 or old.timed_out or base.problems or base.done != len(inputs):
+            raise CheckerError(
+                f"baseline recorder failed (exit {old.returncode}, read {base.done} of {len(inputs)} inputs,"
+                f" problems {base.problems[:3]}):\n{old.stderr[-3000:]}")
+        # The candidate must not be able to run the baseline in its place.
+        (tmp / "old").unlink()
+        new = run_recorder(tmp / "new", inputs, max(args.timeout, args.slowdown * old.elapsed))
+        # Sanitizer reports should name the candidate file, not the temporary copy.
+        new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))
 
     verdict = compare(old, new)
     if verdict.status == "crash" and new.timed_out:

@@ -358,3 +358,34 @@ def test_two_first_runs_at_once_both_work(tmp_path):
     ]
     outputs = [p.communicate(timeout=600)[0] for p in procs]
     assert [p.returncode for p in procs] == [0, 0], outputs
+
+
+@pytest.mark.parametrize("problem", ["missing inputs file", "missing candidate", "malformed escape"])
+def test_problems_with_the_checker_setup_are_checker_errors(tmp_path, problem):
+    cand, inputs = candidate(tmp_path), tmp_path / "inputs.txt"
+    inputs.write_text("[1]\n")
+    if problem == "missing inputs file":
+        inputs = tmp_path / "nonexistent.txt"
+    elif problem == "missing candidate":
+        cand = tmp_path / "nonexistent.c"
+    else:
+        inputs.write_text('"\\x4"\n')  # \x must be followed by two hex digits
+    result = run_check(cand, "--inputs", str(inputs))
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert "CHECKER ERROR" in result.stdout
+
+
+def test_last_input_line_without_a_newline_is_still_checked(tmp_path):
+    inputs = tmp_path / "inputs.txt"
+    inputs.write_text("[1]\n{'a':0}")  # no final newline
+    result = run_check(candidate(tmp_path, *BUG4_FIX), "--inputs", str(inputs))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "input #2: {'a':0}" in result.stdout
+
+
+def test_a_very_long_input_line_is_one_input(tmp_path):
+    inputs = tmp_path / "inputs.txt"
+    inputs.write_text('"' + "x" * 200_000 + '"\n' + "{'a':0}\n")
+    result = run_check(candidate(tmp_path, *BUG4_FIX), "--inputs", str(inputs))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "input #2: {'a':0}" in result.stdout
