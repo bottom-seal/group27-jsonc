@@ -324,6 +324,7 @@ struct json_object *json_tokener_parse_verbose(const char *str, enum json_tokene
 static locale_t c_numeric_locale = (locale_t)0;
 #endif /* HAVE_USELOCALE */
 
+/* CI test: a comment-only change keeps the behaviour. */
 struct json_object *json_tokener_parse_ex(struct json_tokener *tok, const char *str, int len)
 {
 	struct json_object *obj = NULL;
