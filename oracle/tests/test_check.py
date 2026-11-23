@@ -73,6 +73,19 @@ def test_fixing_any_known_bug_is_rejected(tmp_path, bug):
     assert "FAIL" in result.stdout
 
 
+def test_a_wrong_number_value_is_caught_even_when_its_text_is_kept(tmp_path):
+    # json-c stores each double with its original text and prints that text,
+    # so only the recorded value itself shows this change.
+    wrong = candidate(
+        tmp_path,
+        "current = json_object_new_double_s(numd, tok->pb->buf);",
+        "current = json_object_new_double_s(numd + 1.0, tok->pb->buf);",
+    )
+    result = run_check(wrong)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "by field:  type" in result.stdout
+
+
 def test_fixing_a_known_bug_counts_as_a_difference(tmp_path):
     # Bug 4: STRICT accepts single-quoted object keys. A rewrite that quietly
     # fixes it changes behaviour, so the gate must reject it.

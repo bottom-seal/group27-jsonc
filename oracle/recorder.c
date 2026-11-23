@@ -39,9 +39,11 @@ static const struct config CONFIGS[] = {
 #define NCONFIGS (sizeof(CONFIGS) / sizeof(CONFIGS[0]))
 
 /* Type signature of the value tree. The serialized value alone hides some
- * changes (an int64 and a uint64 can print the same), so the types of every
- * node are recorded too: n=null b=boolean d=double i=int U=uint64 above
- * INT64_MAX o=object s=string a=array. */
+ * changes, so the type of every node is recorded too: n=null b=boolean
+ * i=int U=uint64 above INT64_MAX o=object a=array s=string, and d(<value>)
+ * for a double. json-c serializes a parsed double from its original text, so
+ * a wrong numeric value would print exactly like the right one; the value is
+ * therefore recorded in %a (hex float) form, which is exact. */
 static void print_signature(json_object *o)
 {
 	if (!o)
@@ -55,8 +57,10 @@ static void print_signature(json_object *o)
 		                json_object_get_uint64(o) > (uint64_t)INT64_MAX
 		            ? 'U'
 		            : 'i');
+	else if (ty == json_type_double)
+		printf("d(%a)", json_object_get_double(o));
 	else
-		putchar("nbdiosa"[ty]);
+		putchar("nbdioas"[ty]); /* indexed by enum json_type, see json_types.h */
 	if (ty == json_type_array)
 	{
 		putchar('[');
