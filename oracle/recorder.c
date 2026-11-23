@@ -9,8 +9,9 @@
  *
  *     <input index> <config> <type signature> <error> <parse end> <value>
  *
- * followed by a final line "#done". Output is flushed after each input, so if
- * the candidate crashes the records written so far show which input it was on.
+ * followed by a final line "#done <number of inputs read>". Output is flushed
+ * after each input, so if the candidate crashes the records written so far
+ * show which input it was on.
  *
  * Adapted from bughunt/mutation/mut_driver.c.
  */
@@ -134,6 +135,6 @@ int main(void)
 		fflush(stdout);
 		index++;
 	}
-	printf("#done\n");
+	printf("#done %zu\n", index);
 	return 0;
 }

@@ -8,10 +8,11 @@ from compare import Run, compare, report  # noqa: E402
 INPUTS = ["[1]", "[2]", "[3]"]
 
 
-def recorder_output(*records, done=True):
-    """Build recorder output from (index, config, type, error, end, value) tuples."""
+def recorder_output(*records, done=True, inputs=3):
+    """Build recorder output from (index, config, type, error, end, value)
+    tuples. A finished run ends with "#done <number of inputs read>"."""
     lines = ["\t".join(map(str, r)) for r in records]
-    return "\n".join(lines) + ("\n#done\n" if done else "\n")
+    return "\n".join(lines) + (f"\n#done {inputs}\n" if done else "\n")
 
 
 BASELINE = recorder_output(
@@ -66,3 +67,54 @@ def test_crash_log_keeps_the_sanitizer_headline_and_drops_the_memory_dump():
     assert "SUMMARY: AddressSanitizer" in text
     assert "Shadow bytes" not in text  # hex dump of memory: noise for the reader
     assert "frame_39" not in text  # deep stack frames are cut
+
+
+def without(output: str, line_prefix: str) -> str:
+    return "".join(line for line in output.splitlines(keepends=True) if not line.startswith(line_prefix))
+
+
+def test_answers_missing_after_a_normal_exit_are_a_difference():
+    # Exit code 0 and "#done", but input 1 under "strict" was never answered.
+    new = Run(without(BASELINE, "1\tstrict\t"), 0)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "different"
+    text = report(verdict, INPUTS)
+    assert "input #2: [2]" in text
+    assert "candidate: (no answer)" in text
+
+
+def test_extra_answers_are_a_difference():
+    new = Run(BASELINE.replace("#done", "1\tlenient\ta[i]\t0 success\t3\t[2]\n#done"), 0)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "different"
+    assert "baseline:  (no answer)" in report(verdict, INPUTS)
+
+
+def test_an_answer_given_twice_is_a_difference():
+    new = Run(BASELINE.replace("#done", "0\tdefault\ta[i]\t0 success\t3\t[1]\n#done"), 0)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "different"
+    assert "answered twice" in report(verdict, INPUTS)
+
+
+def test_unreadable_lines_are_reported_not_a_checker_crash():
+    new = Run(BASELINE.replace("#done", "debug: got here\n#done"), 0)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "different"
+    assert "unreadable line: debug: got here" in report(verdict, INPUTS)
+
+
+def test_wrong_input_count_in_done_line_is_a_difference():
+    new = Run(BASELINE.replace("#done 3", "#done 2"), 0)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "different"
+    assert "read 2 inputs, the baseline read 3" in report(verdict, INPUTS)
+
+
+def test_line_cut_off_by_a_crash_is_not_read_as_an_answer():
+    # The process died while writing input 1's strict answer: half a line.
+    new = Run(without(BASELINE, "1\tstrict").split("1\tdefault")[0] + "1\tdefault\ta[", 1)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "crash"
+    assert verdict.crash_index == 1
+    assert verdict.mismatches == []

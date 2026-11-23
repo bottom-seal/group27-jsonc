@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from compare import Run, compare, report  # noqa: E402
+from compare import Run, compare, parse_output, report  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 ORACLE = REPO / "oracle"
@@ -188,8 +188,11 @@ def main(argv=None) -> int:
                 return EXIT_BUILD
 
             old = run_recorder(tmp / "old", inputs, args.timeout)
-            if old.returncode != 0 or old.timed_out or not old.output.endswith("#done\n"):
-                raise CheckerError(f"baseline recorder failed (exit {old.returncode}):\n{old.stderr[-3000:]}")
+            base = parse_output(old.output)
+            if old.returncode != 0 or old.timed_out or base.problems or base.done != len(inputs):
+                raise CheckerError(
+                    f"baseline recorder failed (exit {old.returncode}, read {base.done} of {len(inputs)} inputs,"
+                    f" problems {base.problems[:3]}):\n{old.stderr[-3000:]}")
             new = run_recorder(tmp / "new", inputs, args.timeout)
             # Sanitizer reports should name the candidate file, not the temporary copy.
             new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))
