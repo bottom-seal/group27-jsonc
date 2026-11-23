@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compare import Run, compare, report  # noqa: E402
 
@@ -126,3 +128,21 @@ def test_sanitizer_report_is_a_crash_even_with_exit_code_0():
     verdict = compare(Run(BASELINE, 0), new)
     assert verdict.status == "crash"
     assert "heap-use-after-free" in report(verdict, INPUTS)
+
+
+@pytest.mark.parametrize("field, record", [
+    ("type", (1, "strict", "a[d(0x1p+1)]", "0 success", 3, "[2]")),
+    ("error", (1, "strict", "a[i]", "1 continue", 3, "[2]")),
+    ("end", (1, "strict", "a[i]", "0 success", 2, "[2]")),
+    ("value", (1, "strict", "a[i]", "0 success", 3, "[2.0]")),
+])
+def test_each_kind_of_difference_is_reported_under_its_own_field(field, record):
+    new = Run(BASELINE.replace("1\tstrict\ta[i]\t0 success\t3\t[2]", "\t".join(map(str, record))), 0)
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "different"
+    text = report(verdict, INPUTS)
+    assert f"by field:  {field} 1" in text
+    # baseline's answer first, then the candidate's
+    assert "      baseline:  type=a[i]  error=0 success  end=3  value=[2]\n" in text
+    candidate_answer = dict(zip(("type", "error", "end", "value"), map(str, record[2:])))
+    assert text.endswith("      candidate: " + "  ".join(f"{k}={v}" for k, v in candidate_answer.items()))

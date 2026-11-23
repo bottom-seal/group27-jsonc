@@ -1,9 +1,10 @@
 """End-to-end tests for the checker (seam 1).
 
 Each test builds a candidate json_tokener.c from the baseline source, runs
-`oracle/check.py` on it and checks the verdict. These compile C code, so the
-first run takes a minute (it builds json-c once into .build/); later runs reuse
-that build.
+`oracle/check.py` on it and checks the verdict. These compile C code: the first
+run builds json-c once into .build/ (about 10 seconds); later runs reuse it.
+Every test passes --inputs explicitly, so input numbers in the assertions
+refer to oracle/inputs/core.txt and do not move when input files are added.
 """
 import os
 import subprocess
@@ -14,6 +15,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 CHECK = REPO / "oracle" / "check.py"
+CORE_INPUTS = REPO / "oracle" / "inputs" / "core.txt"
 
 
 def baseline_source() -> str:
@@ -36,7 +38,8 @@ def candidate(tmp_path: Path, old: str = "", new: str = "") -> Path:
 
 def run_check(cand: Path, *extra: str, env: dict = None) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(CHECK), str(cand), *extra],
+        # a later --inputs in extra overrides this one
+        [sys.executable, str(CHECK), str(cand), "--inputs", str(CORE_INPUTS), *extra],
         cwd=REPO, capture_output=True, text=True, timeout=600,
         env=None if env is None else {**os.environ, **env},
     )
@@ -48,31 +51,56 @@ def test_unchanged_tokener_passes(tmp_path):
     assert "PASS" in result.stdout
 
 
-# Fixes from bughunt/local_fixes_findings_1-5.patch. Each one changes behaviour,
-# so the gate must reject it; the expected text is the input that shows the bug.
+def configs_in_report(stdout: str) -> list:
+    """The config names on the report's "by config:" line."""
+    line = next(l for l in stdout.split("\n") if l.startswith("  by config:"))
+    return [entry.rsplit(" ", 1)[0] for entry in line.split(":", 1)[1].strip().split(", ")]
+
+
+# Quiet fixes of known bugs (bughunt/README.md). Each changes behaviour, so the
+# gate must reject it, and only where that bug shows. Entry: (text to replace,
+# replacement, the smallest differing input as reported, a rule every
+# differing config must satisfy). Bugs 1 and 2 use the fixes from
+# bughunt/local_fixes_findings_1-5.patch; that patch's bug-3 fix edits code
+# the baseline does not have, so bug 3 uses an equivalent one-line fix.
 KNOWN_BUG_FIXES = {
     "bug1-unclosed-comment-after-value": (
         "\t\tif (state != json_tokener_state_finish && saved_state != json_tokener_state_finish)",
         "\t\tif ((state != json_tokener_state_finish && saved_state != json_tokener_state_finish) ||\n"
         "\t\t    (tok->err == json_tokener_success && tok->depth > 0))",
+        "input #2616: [[1/*",
+        lambda config: "strict" not in config,  # STRICT rejects comments anyway
     ),
     "bug2-even-stars-close-comment": (
         "\t\t\telse\n\t\t\t{\n\t\t\t\tstate = json_tokener_state_comment;\n\t\t\t}",
         "\t\t\telse if (c != '*')\n\t\t\t{\n\t\t\t\tstate = json_tokener_state_comment;\n\t\t\t}",
+        "input #990: /*[/**/",
+        lambda config: "strict" not in config,
     ),
     "bug3-utf8-lookahead-after-value": (
         "if ((tok->flags & JSON_TOKENER_VALIDATE_UTF8) && (nBytes != 0))",
         "if ((tok->flags & JSON_TOKENER_VALIDATE_UTF8) && (nBytes != 0) && tok->err != json_tokener_success)",
+        "input #2591: {}\\xc6",
+        lambda config: "utf8" in config,
+    ),
+    "bug4-strict-single-quoted-key": (
+        "else if (c == '\"' || c == '\\'')",
+        "else if (c == '\"' || (c == '\\'' && !(tok->flags & JSON_TOKENER_STRICT)))",
+        "input #2082: {'r",
+        lambda config: "strict" in config,
     ),
 }
 
 
 @pytest.mark.parametrize("bug", sorted(KNOWN_BUG_FIXES))
-def test_fixing_any_known_bug_is_rejected(tmp_path, bug):
-    old, new = KNOWN_BUG_FIXES[bug]
+def test_fixing_any_known_bug_is_rejected_where_that_bug_shows(tmp_path, bug):
+    old, new, smallest_input, config_rule = KNOWN_BUG_FIXES[bug]
     result = run_check(candidate(tmp_path, old, new))
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL" in result.stdout
+    first_example = result.stdout.split("Smallest differing inputs")[1].split("\n")[1]
+    assert first_example == "  " + smallest_input
+    configs = configs_in_report(result.stdout)
+    assert configs and all(config_rule(c) for c in configs), configs
 
 
 def test_a_wrong_number_value_is_caught_even_when_its_text_is_kept(tmp_path):
@@ -86,21 +114,6 @@ def test_a_wrong_number_value_is_caught_even_when_its_text_is_kept(tmp_path):
     result = run_check(wrong)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "by field:  type" in result.stdout
-
-
-def test_fixing_a_known_bug_counts_as_a_difference(tmp_path):
-    # Bug 4: STRICT accepts single-quoted object keys. A rewrite that quietly
-    # fixes it changes behaviour, so the gate must reject it.
-    fixed = candidate(
-        tmp_path,
-        "else if (c == '\"' || c == '\\'')",
-        "else if (c == '\"' || (c == '\\'' && !(tok->flags & JSON_TOKENER_STRICT)))",
-    )
-    result = run_check(fixed)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL" in result.stdout
-    assert "{'a':0}" in result.stdout  # the report names a differing input
-    assert "strict" in result.stdout  # ... and the config it differed under
 
 
 PARSE_EX_START = "\tstruct json_object *obj = NULL;\n\tchar c = '\\1';\n"
@@ -137,7 +150,7 @@ def test_hidden_memory_error_fails_even_when_answers_match(tmp_path):
         tmp_path,
         PARSE_EX_START,
         PARSE_EX_START + ON_EMPTY_ARRAY
-        # volatile index: the compiler cannot see the overflow, only ASan can
+        # volatile index: the compiler cannot see the overflow, only the sanitizers can
         + "\t{ char *p = calloc(1, 4); volatile int i = 4; volatile char x = p[i]; (void)x; free(p); }\n",
     )
     result = run_check(overflow)
@@ -330,10 +343,7 @@ def test_compiler_message_with_non_utf8_bytes_is_still_a_build_error(tmp_path):
     assert "BUILD ERROR" in result.stdout
 
 
-BUG4_FIX = (
-    "else if (c == '\"' || c == '\\'')",
-    "else if (c == '\"' || (c == '\\'' && !(tok->flags & JSON_TOKENER_STRICT)))",
-)
+BUG4_FIX = KNOWN_BUG_FIXES["bug4-strict-single-quoted-key"][:2]
 
 
 def test_a_tampered_cache_does_not_change_the_baseline(tmp_path):
