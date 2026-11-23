@@ -125,7 +125,11 @@ class Baseline:
         return sh(cmd + ["-c", str(placed)], cwd=entry["directory"])
 
     def link(self, tokener_obj: Path, recorder_obj: Path, out: Path):
-        return sh([CC, *SANITIZE, str(recorder_obj), str(tokener_obj), str(self.rest_lib), "-lm", "-o", str(out)])
+        # --whole-archive links every json-c object, as the real library build
+        # does, so a candidate defining a symbol another json-c file owns gets
+        # the same "multiple definition" error instead of silently winning.
+        return sh([CC, *SANITIZE, str(recorder_obj), str(tokener_obj),
+                   "-Wl,--whole-archive", str(self.rest_lib), "-Wl,--no-whole-archive", "-lm", "-o", str(out)])
 
     def compile_recorder(self, out: Path):
         must([CC, *SANITIZE, "-I", str(self.src), "-I", str(self.cmake_dir),

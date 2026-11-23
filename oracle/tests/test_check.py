@@ -249,3 +249,29 @@ def test_mistakes_in_other_entry_points_are_caught(tmp_path, mistake):
     old, new, expected = API_MISTAKES[mistake]
     result = run_check(candidate(tmp_path, old, new))
     assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_deleting_a_public_function_is_a_build_error(tmp_path):
+    # json_tokener_parse() and json_tokener_parse_verbose() removed.
+    src = candidate(tmp_path)
+    text = src.read_text()
+    start = text.index("struct json_object *json_tokener_parse(const char *str)")
+    verbose_end = text.index("\n}\n", text.index("struct json_object *json_tokener_parse_verbose(")) + 3
+    src.write_text(text[:start] + text[verbose_end:])
+    result = run_check(src)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "json_tokener_parse" in result.stdout
+
+
+def test_defining_a_function_that_another_json_c_file_owns_is_a_build_error(tmp_path):
+    # json_pointer_get lives in json_pointer.c; the real json-c build fails
+    # with "multiple definition", so the gate must too.
+    clash = candidate(tmp_path)
+    clash.write_text(clash.read_text() + (
+        '\n#include "json_pointer.h"\n'
+        "int json_pointer_get(struct json_object *obj, const char *path, struct json_object **res)\n"
+        "{\n\t(void)obj;\n\t(void)path;\n\t(void)res;\n\treturn -1;\n}\n"
+    ))
+    result = run_check(clash)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "multiple definition of `json_pointer_get'" in result.stdout
