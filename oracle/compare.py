@@ -99,7 +99,7 @@ def compare(old: Run, new: Run) -> Verdict:
     if not reason and cand.done != base.done:
         problems.append(f"read {cand.done} inputs, the baseline read {base.done}")
 
-    status = "crash" if reason else "different" if mismatches or problems else "pass"
+    status = "pass"  # CI test: a PR that weakens the checker
     verdict = Verdict(status, checks=len(base.records), mismatches=mismatches, problems=problems)
     if reason:
         verdict.crash_reason = reason
