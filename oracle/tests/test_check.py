@@ -5,6 +5,7 @@ Each test builds a candidate json_tokener.c from the baseline source, runs
 first run takes a minute (it builds json-c once into .build/); later runs reuse
 that build.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,10 +34,11 @@ def candidate(tmp_path: Path, old: str = "", new: str = "") -> Path:
     return path
 
 
-def run_check(cand: Path, *extra: str) -> subprocess.CompletedProcess:
+def run_check(cand: Path, *extra: str, env: dict = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(CHECK), str(cand), *extra],
         cwd=REPO, capture_output=True, text=True, timeout=600,
+        env=None if env is None else {**os.environ, **env},
     )
 
 
@@ -151,6 +153,29 @@ def test_memory_leak_fails(tmp_path):
     assert result.returncode == 2, result.stdout + result.stderr
     assert "LeakSanitizer" in result.stdout
     assert "at exit" in result.stdout  # leaks are only reported once all inputs are answered
+
+
+LEAK_ON_EMPTY_ARRAY = "\t{ void *volatile leaked = malloc(16); (void)leaked; }\n"
+
+
+def test_sanitizer_settings_in_the_environment_cannot_hide_a_leak(tmp_path):
+    leak = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + LEAK_ON_EMPTY_ARRAY)
+    result = run_check(leak, env={"ASAN_OPTIONS": "detect_leaks=0:exitcode=0", "LSAN_OPTIONS": "exitcode=0"})
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "LeakSanitizer" in result.stdout
+
+
+def test_candidate_cannot_switch_off_leak_detection_with_default_options(tmp_path):
+    # ASan reads __asan_default_options() first; the checker's environment
+    # settings are applied after it and win.
+    leak = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + LEAK_ON_EMPTY_ARRAY)
+    leak.write_text(leak.read_text() + (
+        "\nconst char *__asan_default_options(void);\n"
+        "const char *__asan_default_options(void)\n{\n\treturn \"detect_leaks=0\";\n}\n"
+    ))
+    result = run_check(leak)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "LeakSanitizer" in result.stdout
 
 
 def test_endless_loop_fails_as_a_timeout(tmp_path):

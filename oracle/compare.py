@@ -107,11 +107,17 @@ def compare(old: Run, new: Run) -> Verdict:
     return verdict
 
 
+def _is_sanitizer_headline(line: str) -> bool:
+    return "runtime error:" in line or ("ERROR:" in line and "Sanitizer" in line)
+
+
 def _crash_reason(run: Run, output: Output) -> str:
     if run.timed_out:
         return "timed out"
     if run.returncode != 0:
         return f"exited with code {run.returncode}"
+    if any(_is_sanitizer_headline(line) for line in run.stderr.split("\n")):
+        return "reported a sanitizer error"
     if output.done is None:
         return "stopped before the last input"
     return ""
@@ -139,8 +145,7 @@ def _log_excerpt(log: str, max_lines: int) -> list:
     lines = log.strip().split("\n")
     if lines == [""]:
         return []
-    start = next((i for i, line in enumerate(lines)
-                  if "runtime error:" in line or ("ERROR:" in line and "Sanitizer" in line)), None)
+    start = next((i for i, line in enumerate(lines) if _is_sanitizer_headline(line)), None)
     if start is None:
         return lines[-max_lines:]
     end = next((i for i in range(start, len(lines)) if lines[i].startswith("Shadow bytes")), len(lines))

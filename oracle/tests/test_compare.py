@@ -118,3 +118,11 @@ def test_line_cut_off_by_a_crash_is_not_read_as_an_answer():
     assert verdict.status == "crash"
     assert verdict.crash_index == 1
     assert verdict.mismatches == []
+
+
+def test_sanitizer_report_is_a_crash_even_with_exit_code_0():
+    # e.g. ASAN_OPTIONS=exitcode=0, or a candidate that changed the exit code
+    new = Run(BASELINE, 0, stderr="==7==ERROR: AddressSanitizer: heap-use-after-free on address 0x1")
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "crash"
+    assert "heap-use-after-free" in report(verdict, INPUTS)

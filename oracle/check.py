@@ -38,6 +38,15 @@ CMAKE = os.environ.get("CMAKE", "cmake")
 SANITIZE = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
             "-fno-omit-frame-pointer", "-g", "-O1"]
 
+# Fixed sanitizer settings for both recorders. Environment options are applied
+# after a program's own __asan_default_options(), so these also override a
+# candidate that tries to switch checks off that way.
+SANITIZER_ENV = {
+    "ASAN_OPTIONS": "detect_leaks=1:exitcode=1:halt_on_error=1",
+    "LSAN_OPTIONS": "exitcode=1",
+    "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
+}
+
 EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_BUILD, EXIT_INTERNAL = 0, 1, 2, 3, 4
 
 
@@ -143,6 +152,15 @@ def load_inputs(paths):
     return lines
 
 
+def recorder_env() -> dict:
+    """The caller's environment without any sanitizer settings or preloads,
+    plus the checker's own sanitizer settings."""
+    env = {key: value for key, value in os.environ.items()
+           if not key.endswith("SAN_OPTIONS") and key != "LD_PRELOAD"}
+    env.update(SANITIZER_ENV)
+    return env
+
+
 def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
     """Run one recorder. Its answers go to a file next to the binary; what the
     process prints on stdout is kept separately (the tokener should print
@@ -150,7 +168,8 @@ def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
     answers = binary.with_suffix(".answers")
     data = ("\n".join(inputs) + "\n").encode("latin-1")
     try:
-        p = subprocess.run([str(binary), str(answers)], input=data, capture_output=True, timeout=timeout)
+        p = subprocess.run([str(binary), str(answers)], input=data, capture_output=True, timeout=timeout,
+                           env=recorder_env())
         returncode, timed_out, printed, err = p.returncode, False, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
         returncode, timed_out, printed, err = -1, True, e.stdout or b"", e.stderr or b""
