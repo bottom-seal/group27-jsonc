@@ -37,9 +37,9 @@ def candidate(tmp_path: Path, old: str = "", new: str = "") -> Path:
 
 
 def run_check(cand: Path, *extra: str, env: dict = None) -> subprocess.CompletedProcess:
+    inputs = [] if "--inputs" in extra else ["--inputs", str(CORE_INPUTS)]
     return subprocess.run(
-        # a later --inputs in extra overrides this one
-        [sys.executable, str(CHECK), str(cand), "--inputs", str(CORE_INPUTS), *extra],
+        [sys.executable, str(CHECK), str(cand), *inputs, *extra],
         cwd=REPO, capture_output=True, text=True, timeout=600,
         env=None if env is None else {**os.environ, **env},
     )
@@ -399,3 +399,12 @@ def test_a_very_long_input_line_is_one_input(tmp_path):
     result = run_check(candidate(tmp_path, *BUG4_FIX), "--inputs", str(inputs))
     assert result.returncode == 1, result.stdout + result.stderr
     assert "input #2: {'a':0}" in result.stdout
+
+
+def test_inputs_option_before_the_candidate_does_not_swallow_it(tmp_path):
+    # `--inputs FILE CANDIDATE` once read CANDIDATE as a second input file and
+    # silently checked json-c/json_tokener.c instead.
+    fixed = candidate(tmp_path, *BUG4_FIX)
+    result = subprocess.run([sys.executable, str(CHECK), "--inputs", str(CORE_INPUTS), str(fixed)],
+                            cwd=REPO, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 1, result.stdout + result.stderr

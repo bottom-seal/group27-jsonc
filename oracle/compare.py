@@ -125,8 +125,12 @@ def _crash_reason(run: Run, output: Output) -> str:
     return ""
 
 
-def _input_text(inputs: list, index: int) -> str:
-    return inputs[index] if 0 <= index < len(inputs) else "(no such input)"
+def _input_text(inputs: list, index: int, limit: int = 120) -> str:
+    """The input as written in the input file, shortened if long."""
+    if not 0 <= index < len(inputs):
+        return "(no such input)"
+    text = inputs[index]
+    return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} bytes)"
 
 
 def _answer(values: "tuple | None") -> str:
@@ -201,7 +205,7 @@ def _difference_report(verdict: Verdict, inputs: list, max_examples: int) -> lis
         lines += ["  " + p for p in verdict.problems[:max_examples]]
     if by_input:
         # Smallest inputs first: they are the easiest to debug.
-        shown = sorted(by_input, key=lambda i: (len(_input_text(inputs, i)), i))[:max_examples]
+        shown = sorted(by_input, key=lambda i: (len(inputs[i]) if 0 <= i < len(inputs) else 0, i))[:max_examples]
         lines += ["", f"Smallest differing inputs ({len(shown)} of {len(by_input)}):"]
         for index in shown:
             first, *rest = by_input[index]

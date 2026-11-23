@@ -272,13 +272,17 @@ def build(baseline: Baseline, source: Path, tmp: Path, name: str, max_lines: int
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("candidate", nargs="?", default=str(REPO / "json-c" / "json_tokener.c"))
-    ap.add_argument("--inputs", nargs="+", default=sorted(str(p) for p in (ORACLE / "inputs").glob("*.txt")))
+    # One file per --inputs (repeat it for more), so it can never swallow the
+    # candidate path that follows it.
+    ap.add_argument("--inputs", action="append", metavar="FILE",
+                    help="input file; repeat for several (default: every oracle/inputs/*.txt)")
     ap.add_argument("--timeout", type=float, default=10,
                     help="minimum time limit for the candidate, in seconds (default 10)")
     ap.add_argument("--slowdown", type=float, default=20,
                     help="the candidate may take this many times the baseline's time (default 20)")
     ap.add_argument("--build-dir", default=str(REPO / ".build" / "oracle"))
     args = ap.parse_args(argv)
+    args.inputs = args.inputs or sorted(str(p) for p in (ORACLE / "inputs").glob("*.txt"))
 
     try:
         return check(args)

@@ -146,3 +146,12 @@ def test_each_kind_of_difference_is_reported_under_its_own_field(field, record):
     assert "      baseline:  type=a[i]  error=0 success  end=3  value=[2]\n" in text
     candidate_answer = dict(zip(("type", "error", "end", "value"), map(str, record[2:])))
     assert text.endswith("      candidate: " + "  ".join(f"{k}={v}" for k, v in candidate_answer.items()))
+
+
+def test_long_inputs_are_shortened_in_the_report():
+    inputs = ["[1]", "[" + "7," * 2500 + "7]", "[3]"]
+    new = Run(without(BASELINE, "1\t"), 1)  # crashed on input #2
+    text = report(compare(Run(BASELINE, 0), new), inputs)
+    first_line = text.split("\n")[0]
+    assert len(first_line) < 300
+    assert "(5003 bytes)" in first_line
