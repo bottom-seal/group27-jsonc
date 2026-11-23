@@ -311,3 +311,20 @@ def test_a_much_slower_rewrite_fails_as_a_timeout(tmp_path):
     assert result.returncode == 2, result.stdout + result.stderr
     assert "timed out" in result.stdout
     assert "the baseline took" in result.stdout
+
+
+def test_including_the_baseline_source_is_a_build_error(tmp_path):
+    # Cheat found in review: a one-line "rewrite" that includes the original.
+    sneaky = tmp_path / "json_tokener.c"
+    sneaky.write_text("#include <json_tokener.c>\n")
+    result = run_check(sneaky)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "includes another .c file" in result.stdout
+
+
+def test_compiler_message_with_non_utf8_bytes_is_still_a_build_error(tmp_path):
+    broken = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + "\tthis does not compile; /* \xff */\n")
+    broken.write_bytes(broken.read_text().encode("latin-1"))
+    result = run_check(broken)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "BUILD ERROR" in result.stdout

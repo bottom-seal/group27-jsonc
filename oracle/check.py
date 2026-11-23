@@ -50,6 +50,8 @@ SANITIZER_ENV = {
 }
 
 BASELINE_TIME_LIMIT = 600  # seconds; the baseline takes a few
+COMMAND_TIME_LIMIT = 120  # seconds for one compile or link
+CMAKE_TIME_LIMIT = 900  # seconds for building the baseline library
 
 EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_BUILD, EXIT_INTERNAL = 0, 1, 2, 3, 4
 
@@ -58,9 +60,18 @@ class CheckerError(Exception):
     """The checker could not do its job; not the candidate's fault."""
 
 
-def sh(cmd, **kw):
+def sh(cmd, timeout: float = COMMAND_TIME_LIMIT, **kw):
+    """Run a build command: no stdin, a time limit, and output decoded without
+    ever failing on odd bytes (compiler messages quote the source)."""
     kw.setdefault("text", True)
-    return subprocess.run(cmd, capture_output=True, **kw)
+    if kw["text"]:
+        kw.setdefault("errors", "replace")
+    try:
+        return subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        empty = "" if kw["text"] else b""
+        return subprocess.CompletedProcess(cmd, 124, empty, f"{cmd[0]} did not finish within {timeout:.0f} s"
+                                           if kw["text"] else b"timed out")
 
 
 def must(cmd, **kw):
@@ -100,7 +111,8 @@ class Baseline:
               "-DBUILD_SHARED_LIBS=OFF", "-DBUILD_TESTING=OFF", "-DCMAKE_BUILD_TYPE=Debug",
               f"-DCMAKE_C_COMPILER={CC}", "-DCMAKE_C_FLAGS=" + " ".join(SANITIZE),
               "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"])
-        must([CMAKE, "--build", str(self.cmake_dir), "--target", "json-c", "-j", str(os.cpu_count() or 2)])
+        must([CMAKE, "--build", str(self.cmake_dir), "--target", "json-c", "-j", str(os.cpu_count() or 2)],
+             timeout=CMAKE_TIME_LIMIT)
 
         lib = self.cmake_dir / "libjson-c.a"
         shutil.copy(lib, self.rest_lib)
@@ -135,7 +147,8 @@ class Baseline:
                 skip = True
             elif arg != "-c" and Path(arg).name != "json_tokener.c":
                 cmd.append(arg)
-        return sh(cmd + ["-c", str(placed)], cwd=entry["directory"])
+        # -MD writes the list of files the compiler read, checked in build()
+        return sh(cmd + ["-MD", "-MF", str(obj.with_suffix(".d")), "-c", str(placed)], cwd=entry["directory"])
 
     def link(self, tokener_obj: Path, recorder_obj: Path, out: Path):
         # --whole-archive links every json-c object, as the real library build
@@ -204,6 +217,12 @@ def build(baseline: Baseline, source: Path, tmp: Path, name: str, max_lines: int
     obj = tmp / f"{name}.o"
     result = baseline.compile_tokener(source, obj)
     if result.returncode == 0:
+        # json_tokener.c must be the rewrite itself, not a wrapper that
+        # #includes another implementation (such as the baseline source).
+        included = [dep for dep in obj.with_suffix(".d").read_text().replace("\\\n", " ").split()[1:]
+                    if dep.endswith(".c") and Path(dep) != placed_source(obj)]
+        if included:
+            return "the candidate includes another .c file: " + ", ".join(included)
         result = baseline.link(obj, tmp / "recorder.o", tmp / name)
     if result.returncode == 0:
         return ""
