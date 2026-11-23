@@ -15,7 +15,8 @@ Needs `gcc`, `cmake`, `git` (a clone with full history) and Python 3. The first
 run builds json-c once into `.build/oracle/` (about 10 seconds); after that a
 check takes a few seconds.
 
-Options: `--inputs FILE...` (default: every `oracle/inputs/*.txt`),
+Options: `--inputs FILE` (repeat it for several files; default: every
+`oracle/inputs/*.txt`),
 `--timeout` and `--slowdown` (time limit, below), `--build-dir`.
 
 ## Verdicts
@@ -107,6 +108,9 @@ Not checked yet, mostly left for later tasks:
 - **Other files in a rewrite PR.** The checker compiles the candidate against
   the baseline headers and ignores changes to any other file. CI must reject
   rewrite PRs that touch anything besides `json-c/json_tokener.c`.
+- **Locale.** The recorder runs in the C locale, so a rewrite that drops
+  json-c's switch to the C number format would only misbehave under a locale
+  with a decimal comma (such as `de_DE`), which is not installed here.
 - **Bugs 5–8** in `bughunt/README.md` and allocation-failure paths in general:
   an answer comparison cannot see out-of-memory handling, threads, or
   memory growth.
