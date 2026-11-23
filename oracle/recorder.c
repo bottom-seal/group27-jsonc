@@ -5,13 +5,19 @@
  * Input (stdin): one JSON document per line. "\xNN" stands for the byte 0xNN,
  * so documents can contain newlines, NUL bytes and invalid UTF-8.
  *
- * Output (stdout): for every input and every config, one tab-separated record
+ * Usage: recorder ANSWERS_FILE < inputs
+ *
+ * Output (ANSWERS_FILE): for every input and every config, one tab-separated
+ * record
  *
  *     <input index> <config> <type signature> <error> <parse end> <value>
  *
  * followed by a final line "#done <number of inputs read>". Output is flushed
  * after each input, so if the candidate crashes the records written so far
  * show which input it was on.
+ *
+ * The answers go to their own file, not stdout, so anything the tokener itself
+ * prints cannot corrupt them; the checker compares stdout separately.
  *
  * Adapted from bughunt/mutation/mut_driver.c.
  */
@@ -21,6 +27,8 @@
 #include <string.h>
 
 #include "json.h"
+
+static FILE *out; /* the answers file */
 
 struct config
 {
@@ -49,35 +57,35 @@ static void print_signature(json_object *o)
 {
 	if (!o)
 	{
-		putchar('n');
+		fputc('n', out);
 		return;
 	}
 	enum json_type ty = json_object_get_type(o);
 	if (ty == json_type_int)
-		putchar(json_object_get_int64(o) == INT64_MAX &&
+		fputc(json_object_get_int64(o) == INT64_MAX &&
 		                json_object_get_uint64(o) > (uint64_t)INT64_MAX
 		            ? 'U'
-		            : 'i');
+		            : 'i', out);
 	else if (ty == json_type_double)
-		printf("d(%a)", json_object_get_double(o));
+		fprintf(out, "d(%a)", json_object_get_double(o));
 	else
-		putchar("nbdioas"[ty]); /* indexed by enum json_type, see json_types.h */
+		fputc("nbdioas"[ty], out); /* indexed by enum json_type, see json_types.h */
 	if (ty == json_type_array)
 	{
-		putchar('[');
+		fputc('[', out);
 		for (size_t i = 0; i < json_object_array_length(o); i++)
 			print_signature(json_object_array_get_idx(o, i));
-		putchar(']');
+		fputc(']', out);
 	}
 	if (ty == json_type_object)
 	{
-		putchar('{');
+		fputc('{', out);
 		json_object_object_foreach(o, key, val)
 		{
 			(void)key;
 			print_signature(val);
 		}
-		putchar('}');
+		fputc('}', out);
 	}
 }
 
@@ -112,18 +120,23 @@ static void record_oneshot(size_t index, const struct config *cfg, const char *b
 	json_object *obj = json_tokener_parse_ex(tok, buf, (int)n + 1);
 	enum json_tokener_error err = json_tokener_get_error(tok);
 
-	printf("%zu\t%s\t", index, cfg->name);
+	fprintf(out, "%zu\t%s\t", index, cfg->name);
 	print_signature(obj);
-	printf("\t%d %s\t%zu\t%s\n", (int)err, json_tokener_error_desc(err),
-	       json_tokener_get_parse_end(tok),
-	       obj ? json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN) : "-");
+	fprintf(out, "\t%d %s\t%zu\t%s\n", (int)err, json_tokener_error_desc(err),
+	        json_tokener_get_parse_end(tok),
+	        obj ? json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN) : "-");
 
 	json_object_put(obj);
 	json_tokener_free(tok);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+	if (argc != 2 || !(out = fopen(argv[1], "w")))
+	{
+		fprintf(stderr, "usage: recorder ANSWERS_FILE < inputs\n");
+		return 3;
+	}
 	static char line[1 << 17], buf[1 << 17];
 	size_t index = 0;
 	while (fgets(line, sizeof line, stdin))
@@ -132,9 +145,9 @@ int main(void)
 		size_t n = decode_line(line, len, buf);
 		for (size_t c = 0; c < NCONFIGS; c++)
 			record_oneshot(index, &CONFIGS[c], buf, n);
-		fflush(stdout);
+		fflush(out);
 		index++;
 	}
-	printf("#done %zu\n", index);
-	return 0;
+	fprintf(out, "#done %zu\n", index);
+	return fclose(out) == 0 ? 0 : 3;
 }

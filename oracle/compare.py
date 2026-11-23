@@ -18,10 +18,11 @@ FIELDS = ("type", "error", "end", "value")
 @dataclass(frozen=True)
 class Run:
     """What one recorder process produced."""
-    output: str
+    output: str  # the answers file
     returncode: int
     timed_out: bool = False
     stderr: str = ""
+    printed: str = ""  # what the process wrote to stdout
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,8 @@ def compare(old: Run, new: Run) -> Verdict:
     mismatches += [Mismatch(*key, None, got) for key, got in cand.records.items() if key not in base.records]
 
     problems = list(cand.problems)
+    if new.printed != old.printed:
+        problems.append(f"printed to stdout (the baseline printed {len(old.printed)} bytes): {new.printed[:300]!r}")
     if not reason and cand.done != base.done:
         problems.append(f"read {cand.done} inputs, the baseline read {base.done}")
 

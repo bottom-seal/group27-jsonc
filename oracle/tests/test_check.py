@@ -171,3 +171,33 @@ def test_off_by_one_in_the_nesting_limit_is_caught(tmp_path, anchor):
     result = run_check(candidate(tmp_path, anchor, anchor.replace(">=", ">")))
     assert result.returncode == 2, result.stdout + result.stderr
     assert "heap-buffer-overflow" in result.stdout
+
+
+def test_printing_to_stdout_is_a_difference(tmp_path):
+    # The baseline tokener prints nothing; a leftover debug print changes
+    # what a program using json-c outputs, and must not corrupt the answers.
+    noisy = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + '\t\tprintf("debug: got []\\n");\n')
+    result = run_check(noisy)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "printed to stdout" in result.stdout
+    assert "debug: got []" in result.stdout
+
+
+def test_quitting_early_after_faking_the_end_marker_is_a_crash(tmp_path):
+    # Cheat found in review: print the recorder's end marker and exit 0
+    # on the first call, so nothing is ever compared.
+    fake = candidate(
+        tmp_path, PARSE_EX_START,
+        PARSE_EX_START + '\t{ printf("#done 3402\\n"); fflush(stdout); _exit(0); }\n',
+    )
+    fake.write_text("#include <unistd.h>\n" + fake.read_text())
+    result = run_check(fake)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "stopped before the last input on input #1:" in result.stdout
+
+
+def test_exiting_normally_partway_is_a_crash(tmp_path):
+    quits = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + "\t\texit(0);\n")
+    result = run_check(quits)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "stopped before the last input on input #50: []" in result.stdout

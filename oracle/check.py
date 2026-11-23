@@ -140,14 +140,18 @@ def load_inputs(paths):
 
 
 def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
+    """Run one recorder. Its answers go to a file next to the binary; what the
+    process prints on stdout is kept separately (the tokener should print
+    nothing)."""
+    answers = binary.with_suffix(".answers")
     data = ("\n".join(inputs) + "\n").encode("latin-1")
     try:
-        p = subprocess.run([str(binary)], input=data, capture_output=True, timeout=timeout)
-        return Run(p.stdout.decode("latin-1"), p.returncode, False, p.stderr.decode("latin-1"))
+        p = subprocess.run([str(binary), str(answers)], input=data, capture_output=True, timeout=timeout)
+        returncode, timed_out, printed, err = p.returncode, False, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
-        out = (e.stdout or b"").decode("latin-1")
-        err = (e.stderr or b"").decode("latin-1")
-        return Run(out, -1, True, err)
+        returncode, timed_out, printed, err = -1, True, e.stdout or b"", e.stderr or b""
+    output = answers.read_bytes().decode("latin-1") if answers.exists() else ""
+    return Run(output, returncode, timed_out, err.decode("latin-1"), printed.decode("latin-1"))
 
 
 def build(baseline: Baseline, source: Path, tmp: Path, name: str, max_lines: int = 40) -> str:
