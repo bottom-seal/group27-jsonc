@@ -180,7 +180,7 @@ def test_candidate_cannot_switch_off_leak_detection_with_default_options(tmp_pat
 
 def test_endless_loop_fails_as_a_timeout(tmp_path):
     hang = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + "\t\tfor (;;) {}\n")
-    result = run_check(hang, "--timeout", "10")
+    result = run_check(hang, "--timeout", "1", "--slowdown", "2")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "timed out" in result.stdout
     assert "input #50: []" in result.stdout
@@ -300,3 +300,14 @@ def test_defining_a_function_that_another_json_c_file_owns_is_a_build_error(tmp_
     result = run_check(clash)
     assert result.returncode == 3, result.stdout + result.stderr
     assert "multiple definition of `json_pointer_get'" in result.stdout
+
+
+def test_a_much_slower_rewrite_fails_as_a_timeout(tmp_path):
+    # 0.2 ms extra per call is several times slower than the baseline over
+    # ~100k calls; with --slowdown 2 the limit is twice the baseline's time.
+    slow = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + "\tusleep(200);\n")
+    slow.write_text("#include <unistd.h>\n" + slow.read_text())
+    result = run_check(slow, "--timeout", "1", "--slowdown", "2")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "timed out" in result.stdout
+    assert "the baseline took" in result.stdout

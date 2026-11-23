@@ -23,9 +23,11 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -46,6 +48,8 @@ SANITIZER_ENV = {
     "LSAN_OPTIONS": "exitcode=1",
     "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
 }
+
+BASELINE_TIME_LIMIT = 600  # seconds; the baseline takes a few
 
 EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_BUILD, EXIT_INTERNAL = 0, 1, 2, 3, 4
 
@@ -164,17 +168,34 @@ def recorder_env() -> dict:
 def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
     """Run one recorder. Its answers go to a file next to the binary; what the
     process prints on stdout is kept separately (the tokener should print
-    nothing)."""
+    nothing). It runs in its own process group, which is killed afterwards, so
+    nothing it started outlives the run."""
     answers = binary.with_suffix(".answers")
     data = ("\n".join(inputs) + "\n").encode("latin-1")
+    start = time.monotonic()
+    proc = subprocess.Popen([str(binary), str(answers)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, env=recorder_env(), cwd=binary.parent,
+                            start_new_session=True)
     try:
-        p = subprocess.run([str(binary), str(answers)], input=data, capture_output=True, timeout=timeout,
-                           env=recorder_env())
-        returncode, timed_out, printed, err = p.returncode, False, p.stdout, p.stderr
-    except subprocess.TimeoutExpired as e:
-        returncode, timed_out, printed, err = -1, True, e.stdout or b"", e.stderr or b""
+        printed, err = proc.communicate(data, timeout=timeout)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        printed, err = proc.communicate()
+        timed_out = True
+    finally:
+        _kill_group(proc)
+    elapsed = time.monotonic() - start
     output = answers.read_bytes().decode("latin-1") if answers.exists() else ""
-    return Run(output, returncode, timed_out, err.decode("latin-1"), printed.decode("latin-1"))
+    return Run(output, -1 if timed_out else proc.returncode, timed_out, err.decode("latin-1"),
+               printed.decode("latin-1"), elapsed, timeout)
+
+
+def _kill_group(proc: subprocess.Popen):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def build(baseline: Baseline, source: Path, tmp: Path, name: str, max_lines: int = 40) -> str:
@@ -195,7 +216,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("candidate", nargs="?", default=str(REPO / "json-c" / "json_tokener.c"))
     ap.add_argument("--inputs", nargs="+", default=sorted(str(p) for p in (ORACLE / "inputs").glob("*.txt")))
-    ap.add_argument("--timeout", type=float, default=300, help="seconds per recorder run")
+    ap.add_argument("--timeout", type=float, default=10,
+                    help="minimum time limit for the candidate, in seconds (default 10)")
+    ap.add_argument("--slowdown", type=float, default=20,
+                    help="the candidate may take this many times the baseline's time (default 20)")
     ap.add_argument("--build-dir", default=str(REPO / ".build" / "oracle"))
     args = ap.parse_args(argv)
 
@@ -214,13 +238,13 @@ def main(argv=None) -> int:
                 print(f"BUILD ERROR: the candidate {args.candidate} does not build\n{problem}")
                 return EXIT_BUILD
 
-            old = run_recorder(tmp / "old", inputs, args.timeout)
+            old = run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT)
             base = parse_output(old.output)
             if old.returncode != 0 or old.timed_out or base.problems or base.done != len(inputs):
                 raise CheckerError(
                     f"baseline recorder failed (exit {old.returncode}, read {base.done} of {len(inputs)} inputs,"
                     f" problems {base.problems[:3]}):\n{old.stderr[-3000:]}")
-            new = run_recorder(tmp / "new", inputs, args.timeout)
+            new = run_recorder(tmp / "new", inputs, max(args.timeout, args.slowdown * old.elapsed))
             # Sanitizer reports should name the candidate file, not the temporary copy.
             new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))
     except CheckerError as e:
@@ -228,6 +252,9 @@ def main(argv=None) -> int:
         return EXIT_INTERNAL
 
     verdict = compare(old, new)
+    if verdict.status == "crash" and new.timed_out:
+        verdict.crash_reason = (f"timed out after {new.time_limit:.1f} s"
+                                f" (the baseline took {old.elapsed:.1f} s)")
     print(report(verdict, inputs))
     return {"pass": EXIT_PASS, "different": EXIT_DIFFERENT, "crash": EXIT_CRASH}[verdict.status]
 

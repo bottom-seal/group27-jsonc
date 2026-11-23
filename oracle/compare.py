@@ -23,6 +23,8 @@ class Run:
     timed_out: bool = False
     stderr: str = ""
     printed: str = ""  # what the process wrote to stdout
+    elapsed: float = 0.0  # seconds
+    time_limit: float = 0.0  # seconds it was allowed
 
 
 @dataclass(frozen=True)
