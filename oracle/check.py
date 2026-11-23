@@ -19,6 +19,8 @@ Needs gcc, cmake and git on PATH (or set CC / CMAKE).
 """
 import argparse
 import dataclasses
+import fcntl
+import hashlib
 import json
 import os
 import shlex
@@ -48,6 +50,14 @@ SANITIZER_ENV = {
     "LSAN_OPTIONS": "exitcode=1",
     "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
 }
+
+# The json-c tree every rewrite is compared against: `git rev-parse baseline:json-c`,
+# json-c commit d2ce61e. Pinned by content, so moving the `baseline` tag or
+# rewriting history cannot change what the candidate is compared with.
+BASELINE_TREE = "6471b8bea91c872deb52fc74badcb8889bcddbaa"
+CMAKE_ARGS = ["-DBUILD_SHARED_LIBS=OFF", "-DBUILD_TESTING=OFF", "-DCMAKE_BUILD_TYPE=Debug",
+              "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
+CACHE_FORMAT = 2  # bump when the cached build's layout or recipe changes
 
 BASELINE_TIME_LIMIT = 600  # seconds; the baseline takes a few
 COMMAND_TIME_LIMIT = 120  # seconds for one compile or link
@@ -87,30 +97,44 @@ def placed_source(obj: Path) -> Path:
     return obj.parent / f"{obj.stem}-src" / "json_tokener.c"
 
 
+def baseline_tokener_source() -> bytes:
+    """The baseline json_tokener.c, read from git on every run. Never taken from
+    the build cache: a candidate runs with write access to it."""
+    return must(["git", "cat-file", "blob", f"{BASELINE_TREE}:json_tokener.c"], cwd=REPO, text=False).stdout
+
+
 class Baseline:
-    """The baseline json-c, extracted from the `baseline` tag and built once per
-    baseline commit. Everything except json_tokener.c is shared by the old and
-    new builds, so the two can only differ in the tokener."""
+    """The baseline json-c (git tree BASELINE_TREE), built once into a cache
+    folder named after everything that affects the build. Everything except
+    json_tokener.c is shared by the old and new builds, so the two can only
+    differ in the tokener."""
 
     def __init__(self, build_root: Path):
-        commit = must(["git", "rev-parse", "baseline^{commit}"], cwd=REPO).stdout.strip()
-        self.root = build_root / f"baseline-{commit[:12]}"
+        if sh(["git", "cat-file", "-e", f"{BASELINE_TREE}^{{tree}}"], cwd=REPO).returncode != 0:
+            raise CheckerError(f"baseline tree {BASELINE_TREE} is not in this repository;"
+                               " clone it with full history")
+        compiler = must([CC, "--version"]).stdout.split("\n")[0]
+        recipe = json.dumps([BASELINE_TREE, CACHE_FORMAT, CC, compiler, SANITIZE, CMAKE_ARGS])
+        self.root = build_root / f"baseline-{hashlib.sha256(recipe.encode()).hexdigest()[:12]}"
         self.src = self.root / "src" / "json-c"
         self.cmake_dir = self.root / "cmake"
         self.rest_lib = self.root / "libjson-c-without-tokener.a"
         self.tokener_cmd = self.root / "tokener-compile.json"
-        if not (self.root / "ready").exists():
-            self._build()
+        # One builder at a time; "ready" is written last, so a build that was
+        # interrupted is redone by the next run.
+        build_root.mkdir(parents=True, exist_ok=True)
+        with open(build_root / ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if not (self.root / "ready").exists():
+                self._build()
 
     def _build(self):
         shutil.rmtree(self.root, ignore_errors=True)
         self.src.parent.mkdir(parents=True)
-        archive = must(["git", "archive", "--format=tar", "baseline", "json-c"], cwd=REPO, text=False)
+        archive = must(["git", "archive", "--format=tar", "--prefix=json-c/", BASELINE_TREE], cwd=REPO, text=False)
         subprocess.run(["tar", "-x", "-C", str(self.src.parent)], input=archive.stdout, check=True)
-        must([CMAKE, "-S", str(self.src), "-B", str(self.cmake_dir),
-              "-DBUILD_SHARED_LIBS=OFF", "-DBUILD_TESTING=OFF", "-DCMAKE_BUILD_TYPE=Debug",
-              f"-DCMAKE_C_COMPILER={CC}", "-DCMAKE_C_FLAGS=" + " ".join(SANITIZE),
-              "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"])
+        must([CMAKE, "-S", str(self.src), "-B", str(self.cmake_dir), f"-DCMAKE_C_COMPILER={CC}",
+              "-DCMAKE_C_FLAGS=" + " ".join(SANITIZE), *CMAKE_ARGS])
         must([CMAKE, "--build", str(self.cmake_dir), "--target", "json-c", "-j", str(os.cpu_count() or 2)],
              timeout=CMAKE_TIME_LIMIT)
 
@@ -245,11 +269,15 @@ def main(argv=None) -> int:
     try:
         baseline = Baseline(Path(args.build_dir))
         inputs = load_inputs(args.inputs)
-        with tempfile.TemporaryDirectory(dir=baseline.root) as tmp:
+        # Per-run files live outside the cache, so the candidate never runs
+        # next to it.
+        with tempfile.TemporaryDirectory(prefix="oracle-check-") as tmp:
             tmp = Path(tmp)
             baseline.compile_recorder(tmp / "recorder.o")
 
-            problem = build(baseline, baseline.src / "json_tokener.c", tmp, "old")
+            old_source = tmp / "baseline_json_tokener.c"
+            old_source.write_bytes(baseline_tokener_source())
+            problem = build(baseline, old_source, tmp, "old")
             if problem:
                 raise CheckerError("the baseline does not build:\n" + problem)
             problem = build(baseline, Path(args.candidate), tmp, "new")
@@ -263,6 +291,8 @@ def main(argv=None) -> int:
                 raise CheckerError(
                     f"baseline recorder failed (exit {old.returncode}, read {base.done} of {len(inputs)} inputs,"
                     f" problems {base.problems[:3]}):\n{old.stderr[-3000:]}")
+            # The candidate must not be able to run the baseline in its place.
+            (tmp / "old").unlink()
             new = run_recorder(tmp / "new", inputs, max(args.timeout, args.slowdown * old.elapsed))
             # Sanitizer reports should name the candidate file, not the temporary copy.
             new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))

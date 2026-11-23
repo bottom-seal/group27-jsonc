@@ -328,3 +328,33 @@ def test_compiler_message_with_non_utf8_bytes_is_still_a_build_error(tmp_path):
     result = run_check(broken)
     assert result.returncode == 3, result.stdout + result.stderr
     assert "BUILD ERROR" in result.stdout
+
+
+BUG4_FIX = (
+    "else if (c == '\"' || c == '\\'')",
+    "else if (c == '\"' || (c == '\\'' && !(tok->flags & JSON_TOKENER_STRICT)))",
+)
+
+
+def test_a_tampered_cache_does_not_change_the_baseline(tmp_path):
+    # Review showed a candidate can overwrite the cached baseline source, so
+    # that later runs compare candidates against the tampered copy.
+    build = tmp_path / "build"
+    assert run_check(candidate(tmp_path), "--build-dir", str(build)).returncode == 0
+    (cached,) = build.glob("baseline-*/src/json-c/json_tokener.c")
+    fixed = candidate(tmp_path, *BUG4_FIX)
+    cached.write_text(fixed.read_text())
+    result = run_check(fixed, "--build-dir", str(build))
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_two_first_runs_at_once_both_work(tmp_path):
+    build = tmp_path / "build"
+    same = candidate(tmp_path)
+    procs = [
+        subprocess.Popen([sys.executable, str(CHECK), str(same), "--build-dir", str(build)],
+                         cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for _ in range(2)
+    ]
+    outputs = [p.communicate(timeout=600)[0] for p in procs]
+    assert [p.returncode for p in procs] == [0, 0], outputs
