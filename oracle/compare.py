@@ -8,11 +8,22 @@ and, once every input is answered, a final line "#done <number of inputs>".
 This module turns two such outputs into a verdict and a human-readable report.
 The candidate must give exactly the baseline's set of answers: a missing,
 extra, duplicated or unreadable line is a difference, never ignored.
+
+The one exception is answers given while an allocation fails on purpose
+(see _acceptable_under_failure): a rewrite may allocate in a different order,
+so those are judged by what they say, not by matching the baseline's k.
 """
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
 FIELDS = ("type", "error", "end", "value")
+
+# Answers given while the k-th allocation failed on purpose (recorder.c):
+# "oom<k>/<flags>", "oomb<k>/<flags>", "oomv<k>/default", "api/oomnew<k>/<which>".
+_UNDER_FAILURE = re.compile(r"^(?:(oomb|oomv|oom)\d+|api/(oomnew)\d+)/(.*)$")
+_SAME_PARSE_WITHOUT_FAILURE = {"oom": "oneshot", "oomb": "bytewise"}
+OUT_OF_MEMORY = "16 out of memory"
 
 
 @dataclass(frozen=True)
@@ -36,6 +47,8 @@ class Mismatch:
 
     @property
     def fields(self) -> list:
+        if _failure_group(self.config):
+            return ["answer under a failed allocation"]
         if self.old is None:
             return ["extra answer"]
         if self.new is None:
@@ -82,6 +95,43 @@ def parse_output(text: str) -> Output:
     return out
 
 
+def _failure_group(config: str) -> "tuple | None":
+    """(way, flags) for an answer given while an allocation failed, else None."""
+    m = _UNDER_FAILURE.match(config)
+    return (m.group(1) or m.group(2), m.group(3)) if m else None
+
+
+def _answers_under_failure(records: dict) -> dict:
+    """For each (input, way, flags): every (type, error, value) the baseline
+    gave with some allocation failing, whichever k it was."""
+    seen = {}
+    for (index, config), (typ, err, _end, value) in records.items():
+        group = _failure_group(config)
+        if group:
+            seen.setdefault((index, *group), set()).add((typ, err, value))
+    return seen
+
+
+def _acceptable_under_failure(index: int, group: tuple, answer: tuple, seen: dict, base: dict) -> bool:
+    """A rewrite may allocate differently, so its k-th allocation is not the
+    baseline's k-th. Under a failed allocation it may answer anything the
+    baseline answered for this input and way under some failed allocation
+    (so the baseline's quirks are allowed wherever they move), report "out of
+    memory", or give the answer of the same parse with nothing failing.
+    Where it stopped (parse end) is not compared. Crashes and leaks still fail
+    through the sanitizers, and having more or fewer allocations is fine."""
+    typ, err, _end, value = answer
+    way, flags = group
+    if (typ, err, value) in seen.get((index, way, flags), ()):
+        return True
+    if way == "oomnew":  # creating a tokener: NULL is the only other right answer
+        return value == "NULL"
+    if err == OUT_OF_MEMORY and value == "-":
+        return True
+    normal = base.get((index, "verbose" if way == "oomv" else f"{_SAME_PARSE_WITHOUT_FAILURE[way]}/{flags}"))
+    return normal is not None and (typ, err, value) == (normal[0], normal[1], normal[3])
+
+
 def compare(old: Run, new: Run) -> Verdict:
     base = parse_output(old.output)
     if base.problems or base.done is None:
@@ -91,10 +141,19 @@ def compare(old: Run, new: Run) -> Verdict:
 
     mismatches = []
     for key, answer in base.records.items():
+        if _failure_group(key[1]):
+            continue  # judged from the candidate's answers, below
         got = cand.records.get(key)
         if got != answer and not (got is None and reason):  # after a crash, missing answers are expected
             mismatches.append(Mismatch(*key, answer, got))
-    mismatches += [Mismatch(*key, None, got) for key, got in cand.records.items() if key not in base.records]
+    seen = _answers_under_failure(base.records)
+    for key, got in cand.records.items():
+        group = _failure_group(key[1])
+        if group:
+            if not _acceptable_under_failure(key[0], group, got, seen, base.records):
+                mismatches.append(Mismatch(*key, base.records.get(key), got))
+        elif key not in base.records:
+            mismatches.append(Mismatch(*key, None, got))
 
     problems = list(cand.problems)
     if new.printed != old.printed:

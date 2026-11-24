@@ -81,6 +81,13 @@ few known cases (`[12-3]`, a UTF-8 character split across calls, `1 2` under
   under `default` for inputs up to 64 bytes; inputs over 1,000 bytes are
   skipped. The recorder is linked with `-Wl,--wrap=malloc` (and `calloc`,
   `realloc`, `strdup`), so the tokener's own allocations go through it.
+  A rewrite may allocate in a different order, so these answers are not
+  matched k by k. Each answer the candidate gives under a failed allocation
+  must be one of: an answer the baseline gave for the same input and way
+  under some failed allocation (its quirks may move), "out of memory", or the
+  answer of the same parse with nothing failing. Where it stopped is not
+  compared, more or fewer allocations are fine, and a crash or leak still
+  fails.
 - `de_DE` and `de_DE-restored`: the input parsed under `de_DE.UTF-8`, whose
   decimal point is `,`, under `default` and `strict`, and whether the caller's
   locale is back after the call. json-c must switch to the C number format
@@ -212,6 +219,7 @@ CI does not run these (see `ci/README.md`); run them before changing the gate.
   locale, right after a reset, on a fuzzer-found input, or as a timeout on the
   large inputs; when creating a tokener runs out of memory, inside
   `json_tokener_parse_verbose()`, or with two tokeners of different settings.
+  A correct rewrite that makes one extra allocation must pass.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
 - `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the
@@ -234,10 +242,9 @@ Not checked yet, mostly left for later tasks:
 - **Other files in a rewrite PR.** The checker compiles the candidate against
   the baseline headers and ignores changes to any other file. CI must reject
   rewrite PRs that touch anything besides `json-c/json_tokener.c`.
-- **Allocation failures are compared exactly.** Under a failed allocation the
-  candidate must give the baseline's answer for the same k, so a correct
-  rewrite that allocates in a different order (one buffer fewer, say) fails.
-  A fairer rule (no crash or leak, and either the baseline's answer or an
-  out-of-memory error) is not built yet.
+- **Allocation failures are judged loosely.** A rewrite that, under a failed
+  allocation, gives an answer the baseline gives for the same input under
+  some other failed allocation passes, even if it is not the baseline's
+  answer for this one.
 - **Threads and memory growth** (bugs 8 and 7 in `bughunt/README.md`): an
   answer comparison cannot see data races or how much memory is held.

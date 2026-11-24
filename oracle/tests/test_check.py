@@ -427,6 +427,18 @@ def test_mistakes_seen_under_memory_failure_locale_reset_or_fuzzer_inputs_are_ca
     assert result.returncode == expected, result.stdout + result.stderr
 
 
+def test_a_correct_rewrite_that_allocates_once_more_passes(tmp_path):
+    # A rewrite may allocate in a different order. Here one extra, properly
+    # handled allocation at the start of every call shifts which allocation
+    # fails for each k; a k-by-k comparison would reject this correct rewrite.
+    extra = plant(tmp_path, (CALL_START, CALL_START
+                             + "\t{\n\t\tchar *scratch = malloc(1);\n\t\tif (!scratch)\n\t\t{\n"
+                             "\t\t\ttok->err = json_tokener_error_memory;\n\t\t\treturn NULL;\n\t\t}\n"
+                             "\t\tfree(scratch);\n\t}\n"))
+    result = run_check(extra)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_work_that_grows_with_the_square_of_a_string_times_out_on_large_inputs(tmp_path):
     # Rescans the string read so far at every character: answers are the same,
     # and on core.txt (at most 1,000 bytes) it is not even noticeably slower.

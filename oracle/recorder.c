@@ -400,8 +400,8 @@ char *__wrap_strdup(const char *str)
  * when that failure happened, and the loop stops at the first parse that makes
  * fewer than k allocations. One call under default and strict flags; byte by
  * byte under default flags for inputs up to 64 bytes.
- * The comparison is exact, so the candidate must allocate in the same order
- * as the baseline (see Known gaps in README.md). */
+ * A rewrite may allocate in another order, so compare.py does not match
+ * these answers k by k (see _acceptable_under_failure there). */
 static void record_memory_failures(size_t index, const char *buf, size_t n)
 {
 	if (n > OOM_MAX_LEN)

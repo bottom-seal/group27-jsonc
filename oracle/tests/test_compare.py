@@ -180,3 +180,40 @@ def test_a_crash_is_placed_on_the_input_the_recorder_had_started():
     verdict = compare(Run(BASELINE, 0), new)
     assert verdict.status == "crash" and verdict.crash_index == 1
     assert "on input #2: [2]" in report(verdict, INPUTS)
+
+
+# Answers given while the k-th allocation failed on purpose are judged by what
+# they say, not k by k: a rewrite may allocate in a different order.
+FAILURE_BASELINE = recorder_output(
+    (0, "oneshot/default", "a[i]", "0 success", 3, "[1]"),
+    (0, "oom1/default", "n", "16 out of memory", 0, "-"),
+    (0, "oom2/default", "n", "3 unexpected end of data", 1, "-"),  # a baseline quirk at k=2
+    (0, "oom3/default", "n", "16 out of memory", 2, "-"),
+    inputs=1,
+)
+
+
+def failure_candidate(*records):
+    return Run(recorder_output((0, "oneshot/default", "a[i]", "0 success", 3, "[1]"), *records, inputs=1), 0)
+
+
+@pytest.mark.parametrize("records", [
+    # the baseline's quirk moved to another k, at another position
+    [(0, "oom1/default", "n", "3 unexpected end of data", 0, "-"), (0, "oom2/default", "n", "16 out of memory", 1, "-")],
+    # out of memory where the baseline had the quirk
+    [(0, "oom2/default", "n", "16 out of memory", 1, "-")],
+    # one allocation more: the normal answer, or out of memory, at a k the baseline never reached
+    [(0, "oom4/default", "a[i]", "0 success", 3, "[1]"), (0, "oom5/default", "n", "16 out of memory", 2, "-")],
+    # fewer allocations: no answers at all
+    [],
+], ids=["quirk moved", "out of memory instead", "more allocations", "fewer allocations"])
+def test_answers_under_a_failed_allocation_may_differ_in_order(records):
+    verdict = compare(Run(FAILURE_BASELINE, 0), failure_candidate(*records))
+    assert verdict.status == "pass", report(verdict, ["[1]"])
+
+
+def test_an_answer_under_a_failed_allocation_the_baseline_never_gives_is_a_difference():
+    verdict = compare(Run(FAILURE_BASELINE, 0),
+                      failure_candidate((0, "oom1/default", "n", "4 unexpected character", 0, "-")))
+    assert verdict.status == "different"
+    assert "answer under a failed allocation" in report(verdict, ["[1]"])
