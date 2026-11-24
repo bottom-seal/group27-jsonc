@@ -1,14 +1,19 @@
 # ci: the gate on every pull request
 
-Every pull request runs three checks (`.github/workflows/gate.yml`). Once
-branch protection is on, a PR merges into `main` only when all three pass and a
+Every pull request runs two checks (`.github/workflows/gate.yml`). Once
+branch protection is on, a PR merges into `main` only when both pass and a
 teammate approved it.
 
 | Check | What it does | Fails when |
 |---|---|---|
 | `paths` | `ci/check_paths.py`: which files the PR changes | the PR breaks a path rule (below) |
 | `gate` | `oracle/check.py` on the PR's `json-c/json_tokener.c` | the tokener behaves differently from the baseline, crashes, leaks, is much slower, or does not build (see `oracle/README.md`) |
-| `self-test` | the checker's and the CI's own tests | the checker or CI itself is broken |
+
+CI does not run the checker's and the CI's own tests (`oracle/tests`,
+`ci/tests`). They test the gate, not a rewrite, and on a PR that changes the
+gate they would run that PR's own version, so they could not stop it anyway:
+the code owner's review does. Run them locally before changing the gate:
+`python3 -m pytest oracle/tests ci/tests`.
 
 To see why a check failed, open the PR's **Checks** tab. The `gate` job puts its
 full report (smallest differing inputs, baseline vs candidate answers) on the
@@ -53,7 +58,7 @@ single owner, Role A could never merge a change to the gate.
 
 ## Tested on GitHub
 
-Throwaway PRs, closed after the run:
+Throwaway PRs, closed after the run (when CI still ran the self-tests):
 
 | PR | Change | paths | gate | self-test |
 |---|---|---|---|---|

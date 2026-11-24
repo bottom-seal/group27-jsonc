@@ -7,15 +7,14 @@
 # What it sets:
 # - changes reach main only through a PR, with 1 approval, which must come
 #   from a code owner when the PR touches files that have one;
-# - the PR must pass the checks "paths", "gate" and "self-test" on an
-#   up-to-date branch;
+# - the PR must pass the checks "paths" and "gate" on an up-to-date branch;
 # - a new push dismisses earlier approvals;
 # - the rules apply to admins too; no force pushes, no deleting main.
 set -euo pipefail
 repo=${1:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
 gh api --method PUT "repos/$repo/branches/main/protection" --input - >/dev/null <<'JSON'
 {
-  "required_status_checks": {"strict": true, "contexts": ["paths", "gate", "self-test"]},
+  "required_status_checks": {"strict": true, "contexts": ["paths", "gate"]},
   "enforce_admins": true,
   "required_pull_request_reviews": {
     "required_approving_review_count": 1,

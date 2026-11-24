@@ -190,8 +190,10 @@ shows. Needs gcc's `gcov` (set `GCOV` to use another).
 ## Tests
 
 ```bash
-python3 -m pytest oracle/tests     # about 2 minutes
+python3 -m pytest oracle/tests     # about 8 minutes
 ```
+
+CI does not run these (see `ci/README.md`); run them before changing the gate.
 
 - `tests/test_check.py` runs the whole checker on planted versions of
   `json_tokener.c`: unchanged; quietly fixing known bugs 1–4 (each must differ
