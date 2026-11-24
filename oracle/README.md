@@ -123,8 +123,14 @@ Inputs, one per line:
   an array of 50,000 numbers, an object with 20,000 keys, 31 nested arrays and
   a 206 KB string in an array.
 - `inputs/fuzz.txt`: inputs the differential fuzzer found that the others miss.
+- `inputs/neighbours.txt`: 2,268 inputs made from 120 short documents in
+  `core.txt` that the baseline accepts, by replacing each character the
+  tokener compares against (`{ } [ ] , : " * + - . / 0-9 e E` and the letters
+  of `true`, `false`, `null`, `NaN`, `Infinity`) with the byte just below or
+  just above it, one at a time. Mistakes like `c == '}'` becoming `c >= '}'`
+  need such a neighbour (here `~`) in the right place.
 
-A full check is 656,203 answers. `\xNN`
+A full check is 1,051,570 answers. `\xNN`
 (exactly two hex digits) stands for the byte 0xNN, and a literal backslash
 before `x` is written `\x5c`.
 
@@ -198,6 +204,8 @@ python3 -m pytest oracle/tests     # about 2 minutes
   not reset or not kept between calls, values shared by all tokeners, the
   trailing-characters check rewritten for the flag sets without `STRICT`, and
   wrong answers for `len < -1` and `json_tokener_new_ex(0)`.
+- A resumed number accepting a sign it should not, which only a
+  neighbour input shows.
 - And mistakes that only show when an allocation fails, under the `de_DE`
   locale, right after a reset, on a fuzzer-found input, or as a timeout on the
   large inputs; when creating a tokener runs out of memory, inside

@@ -438,6 +438,19 @@ def test_work_that_grows_with_the_square_of_a_string_times_out_on_large_inputs(t
     assert "timed out" in result.stdout
 
 
+NEIGHBOUR_INPUTS = REPO / "oracle" / "inputs" / "neighbours.txt"
+
+
+def test_a_resumed_number_accepting_a_sign_is_caught_by_the_neighbour_inputs(tmp_path):
+    # When a number continues from an earlier call and its saved text has an
+    # exponent not at the end, no sign may follow. Only a neighbour input,
+    # fed byte by byte, puts a sign there.
+    resumed = plant(tmp_path, ("\t\t\t\t\t\tneg_sign_ok = 0;\n\t\t\t\t\t\tpos_sign_ok = 0;\n",
+                               "\t\t\t\t\t\tneg_sign_ok = 0;\n"))
+    result = run_check(resumed, "--inputs", str(NEIGHBOUR_INPUTS))
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
 def test_a_mistake_in_the_api_calls_is_reported_as_such(tmp_path):
     result = run_check(plant(tmp_path, *MULTI_CALL_MISTAKES["len < -1 gives the wrong error"][0]))
     assert result.returncode == 1, result.stdout + result.stderr
