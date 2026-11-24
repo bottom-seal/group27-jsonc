@@ -132,7 +132,7 @@ class Baseline:
         self.tokener_cmd = self.root / "tokener-compile.json"
         # The recorder also parses under a locale with a decimal comma. Built
         # in its own folder: it does not depend on json-c's build recipe.
-        self.locale_dir = build_root / "locale"
+        self.locale_dir = (build_root / "locale").resolve()  # absolute: the recorder runs elsewhere
         # One builder at a time; "ready" is written last, so a build that was
         # interrupted is redone by the next run.
         build_root.mkdir(parents=True, exist_ok=True)
