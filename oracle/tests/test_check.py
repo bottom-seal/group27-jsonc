@@ -186,7 +186,9 @@ def test_candidate_cannot_switch_off_leak_detection_with_default_options(tmp_pat
         "\nconst char *__asan_default_options(void);\n"
         "const char *__asan_default_options(void)\n{\n\treturn \"detect_leaks=0\";\n}\n"
     ))
-    result = run_check(leak)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(leak, "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "LeakSanitizer" in result.stdout
 
@@ -215,7 +217,9 @@ def test_printing_to_stdout_is_a_difference(tmp_path):
     # The baseline tokener prints nothing; a leftover debug print changes
     # what a program using json-c outputs, and must not corrupt the answers.
     noisy = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + '\t\tprintf("debug: got []\\n");\n')
-    result = run_check(noisy)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(noisy, "--skip-cheat-check")
     assert result.returncode == 1, result.stdout + result.stderr
     assert "printed to stdout" in result.stdout
     assert "debug: got []" in result.stdout
@@ -229,14 +233,18 @@ def test_quitting_early_after_faking_the_end_marker_is_a_crash(tmp_path):
         PARSE_EX_START + '\t{ printf("#done 3402\\n"); fflush(stdout); _exit(0); }\n',
     )
     fake.write_text("#include <unistd.h>\n" + fake.read_text())
-    result = run_check(fake)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(fake, "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "stopped before the last input on input #1:" in result.stdout
 
 
 def test_exiting_normally_partway_is_a_crash(tmp_path):
     quits = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + "\t\texit(0);\n")
-    result = run_check(quits)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(quits, "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "stopped before the last input on input #50: []" in result.stdout
 
@@ -469,6 +477,58 @@ def test_a_mistake_in_the_api_calls_is_reported_as_such(tmp_path):
     assert "the edge-case API calls (after the last input)" in result.stdout
 
 
+REJECTED = 5
+# Candidates that could pass the gate without behaving like the baseline.
+# cheats.py rejects them before they are built. Entry: (text added at the
+# start of each call, or None; text appended to the file, or ""; what the
+# report must say).
+CHEATS = {
+    "reads the sanitizer settings from the environment": (
+        '\tif (getenv("ASAN_OPTIONS")) tok->err = json_tokener_success;\n', "", "getenv"),
+    "writes a file": ('\t{ FILE *f = fopen("/tmp/gate", "w"); if (f) fclose(f); }\n', "", "fopen"),
+    "writes a file through json-c": (
+        '\tjson_object_to_file("/tmp/gate", NULL);\n', "", "json_object_to_file"),
+    "allocates around the allocation-failure wrappers": (
+        "\t{ extern void *__real_malloc(size_t); free(__real_malloc(1)); }\n", "", "__real_malloc"),
+    "prints to stdout": ('\tputs("debug");\n', "", "puts"),
+    "exits": (None, "\nvoid json_tokener_quit(void);\nvoid json_tokener_quit(void) { exit(0); }\n", "exit"),
+    "sleeps": (None, "\nvoid json_tokener_nap(void);\nvoid json_tokener_nap(void) { usleep(1); }\n", "usleep"),
+    "switches leak detection off": (
+        None, "\nint __lsan_is_turned_off(void);\nint __lsan_is_turned_off(void) { return 1; }\n",
+        "__lsan_is_turned_off"),
+    "sets the sanitizer's default options": (
+        None, '\nconst char *__asan_default_options(void);\n'
+              'const char *__asan_default_options(void) { return "detect_leaks=0"; }\n',
+        "__asan_default_options"),
+    "turns off a sanitizer for a function": (
+        None, '\n__attribute__((no_sanitize("address"))) int json_tokener_raw(const char *s);\n'
+              "int json_tokener_raw(const char *s) { return s[0]; }\n", "no_sanitize"),
+    "runs code before main": (None, "\nstatic void json_tokener_setup(void) __attribute__((constructor));\n"
+                                    "static void json_tokener_setup(void) {}\n", "constructor"),
+    "checks for the sanitizer build": (
+        None, "\n#ifdef __SANITIZE_ADDRESS__\nint json_tokener_under_asan = 1;\n#endif\n", "__SANITIZE_ADDRESS__"),
+    "checks for the fuzzer build": (
+        None, "\n#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION\nint json_tokener_fuzzed = 1;\n#endif\n",
+        "FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION"),
+    "carries an answer for one of the gate's inputs": (
+        '\tif (len > 5 && memcmp(str, "[[1/*", 5) == 0)\n\t\ttok->err = json_tokener_success;\n', "", "'[[1/*'"),
+    "uses inline assembly": ('\t__asm__ volatile("" ::: "memory");\n', "", "inline assembly"),
+}
+
+
+@pytest.mark.parametrize("cheat", sorted(CHEATS))
+def test_cheats_are_rejected_before_the_build(tmp_path, cheat):
+    at_start, appended, said = CHEATS[cheat]
+    src = baseline_source()
+    if at_start:
+        src = src.replace(CALL_START, CALL_START + at_start, 1)
+    path = tmp_path / "json_tokener.c"
+    path.write_text("#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n" + src + appended)
+    result = run_check(path)
+    assert result.returncode == REJECTED, result.stdout + result.stderr
+    assert result.stdout.startswith("REJECTED") and said in result.stdout, result.stdout
+
+
 def test_deleting_a_public_function_is_a_build_error(tmp_path):
     # json_tokener_parse() and json_tokener_parse_verbose() removed.
     src = candidate(tmp_path)
@@ -500,7 +560,9 @@ def test_a_much_slower_rewrite_fails_as_a_timeout(tmp_path):
     # ~100k calls; with --slowdown 2 the limit is twice the baseline's time.
     slow = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + "\tusleep(200);\n")
     slow.write_text("#include <unistd.h>\n" + slow.read_text())
-    result = run_check(slow, "--timeout", "1", "--slowdown", "2")
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(slow, "--timeout", "1", "--slowdown", "2", "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "timed out" in result.stdout
     assert "the baseline took" in result.stdout

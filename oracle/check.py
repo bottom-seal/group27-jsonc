@@ -14,6 +14,9 @@ Exit codes:
   2  crash: the candidate crashed, hung, or a sanitizer reported an error
   3  build error: the candidate does not compile or link
   4  internal error: the checker itself could not run (e.g. baseline broken)
+  5  rejected: the candidate does something a rewrite must not (cheats.py),
+     such as reading its environment, defining sanitizer hooks, or carrying
+     text from the gate's inputs
 
 Needs gcc, cmake and git on PATH (or set CC / CMAKE), and glibc's localedef
 with the de_DE locale sources (Ubuntu/Debian: the locales package).
@@ -37,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from compare import Run, compare, parse_output, report  # noqa: E402
+from cheats import find_cheats  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 ORACLE = REPO / "oracle"
@@ -73,7 +77,7 @@ BASELINE_TIME_LIMIT = 600  # seconds; the baseline takes a few
 COMMAND_TIME_LIMIT = 120  # seconds for one compile or link
 CMAKE_TIME_LIMIT = 900  # seconds for building the baseline library
 
-EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_BUILD, EXIT_INTERNAL = 0, 1, 2, 3, 4
+EXIT_PASS, EXIT_DIFFERENT, EXIT_CRASH, EXIT_BUILD, EXIT_INTERNAL, EXIT_REJECTED = 0, 1, 2, 3, 4, 5
 
 
 class CheckerError(Exception):
@@ -177,6 +181,23 @@ class Baseline:
             raise CheckerError("could not build the de_DE.UTF-8 locale with localedef"
                                " (Ubuntu/Debian: install the locales package):\n" + result.stdout + result.stderr)
         (self.locale_dir / "ready").write_text("")
+
+    def source_args(self) -> list:
+        """The include, define and standard options of cmake's command for
+        json_tokener.c, without warnings or instrumentation."""
+        entry = json.loads(self.tokener_cmd.read_text())
+        args = entry.get("arguments") or shlex.split(entry["command"])
+        keep, take_next = [], False
+        for arg in args:
+            if take_next:
+                keep.append(arg)
+                take_next = False
+            elif arg in ("-I", "-D", "-U", "-include"):
+                keep.append(arg)
+                take_next = True
+            elif arg.startswith(("-I", "-D", "-U", "-std=")):
+                keep.append(arg)
+        return keep
 
     def compile_tokener(self, source: Path, obj: Path) -> subprocess.CompletedProcess:
         """Compile a json_tokener.c with exactly the flags cmake uses for the
@@ -307,6 +328,9 @@ def main(argv=None) -> int:
     ap.add_argument("--slowdown", type=float, default=20,
                     help="the candidate may take this many times the baseline's time (default 20)")
     ap.add_argument("--build-dir", default=str(REPO / ".build" / "oracle"))
+    # Only for testing the run-time defences behind the anti-cheat check
+    # (sanitizer settings, stdout comparison, ...); CI never passes it.
+    ap.add_argument("--skip-cheat-check", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     args.inputs = args.inputs or sorted(str(p) for p in (ORACLE / "inputs").glob("*.txt"))
 
@@ -335,6 +359,13 @@ def check(args) -> int:
         problem = build(baseline, old_source, tmp, "old")
         if problem:
             raise CheckerError("the baseline does not build:\n" + problem)
+        if not args.skip_cheat_check:
+            cheats = find_cheats(Path(args.candidate), baseline_tokener_source(), baseline.source_args(),
+                                 baseline.rest_lib, inputs, tmp, CC)
+            if cheats:
+                print(f"REJECTED: the candidate {args.candidate} does what a rewrite of the tokener must not")
+                print("\n".join("  - " + reason for reason in cheats))
+                return EXIT_REJECTED
         problem = build(baseline, Path(args.candidate), tmp, "new")
         if problem:
             print(f"BUILD ERROR: the candidate {args.candidate} does not build\n{problem}")

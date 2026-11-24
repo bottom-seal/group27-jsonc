@@ -29,9 +29,38 @@ Options: `--inputs FILE` (repeat it for several files; default: every
 | 2 | `CRASH` | The candidate crashed, stopped early, leaked memory, a sanitizer (ASan/UBSan/LSan) reported an error even if every answer was right, or it ran too long: more than `--slowdown` (20) times the baseline's time, and at least `--timeout` (10) seconds. The report names the input it was on and the sanitizer's explanation. |
 | 3 | `BUILD ERROR` | The candidate does not compile or link as part of json-c, or it `#include`s another `.c` file. json-c builds with `-Werror`, so new compiler warnings count too. |
 | 4 | `CHECKER ERROR` | The checker could not run: a missing file, a malformed input file, missing tools, or a bug in the checker. Never a verdict on the candidate. |
+| 5 | `REJECTED` | The anti-cheat check (below) found something a rewrite of the tokener must not do. The report lists what. The candidate is not built or run. |
 
 Fixing one of the known json-c bugs (see `bughunt/README.md`) is a change in
 behaviour, so it fails the check.
+
+## Anti-cheat check
+
+Before the candidate is built, `cheats.py` compares it with the baseline
+source and rejects it if it could pass without behaving like the baseline:
+
+1. **Calls.** Compiled without instrumentation, every function it calls must
+   be one the rest of json-c defines (except json-c's file, logging,
+   library-wide settings and random seed functions), one the baseline calls,
+   or a pure C library function (`memcpy`, `strlen`, `strtod`, `malloc`, ...).
+   That shuts out the environment, files, time, randomness, threads,
+   signals, exiting, printing, `dlsym`, and `__real_malloc` (which would get
+   around the allocation-failure wrappers).
+2. **Definitions.** No global symbol the C library or the sanitizer runtime
+   defines (`malloc`, `__lsan_is_turned_off`, `__asan_default_options`, ...),
+   nothing starting with `__`, no `main` or libFuzzer entry point.
+3. **Compiler tricks** in its own code: attributes such as `no_sanitize`,
+   `constructor` or `optimize`, inline assembly, pragmas.
+4. **Build detection:** macros that tell a sanitizer, fuzzer, coverage or
+   optimised build apart (`__SANITIZE_ADDRESS__`,
+   `FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION`, `__OPTIMIZE__`, ...).
+5. **Hard-coded answers:** a new string literal of 4 or more characters that
+   occurs in one of the gate's inputs.
+
+Whatever the baseline itself does stays allowed. On the gate review's 2,401
+mutants (honest code changes) it rejected none. The other half of the
+proposal's cheat detection, a rewrite PR changing tests or deleting
+assertions, is the path rules' job (`ci/README.md`).
 
 ## What is compared
 
@@ -220,6 +249,13 @@ CI does not run these (see `ci/README.md`); run them before changing the gate.
   large inputs; when creating a tokener runs out of memory, inside
   `json_tokener_parse_verbose()`, or with two tokeners of different settings.
   A correct rewrite that makes one extra allocation must pass.
+- And cheats the anti-cheat check must reject before the build: reading the
+  environment, writing files (directly or through json-c), getting around the
+  allocation wrappers, printing, exiting, sleeping, sanitizer hooks and
+  attributes, constructors, testing for the sanitizer or fuzzer build, inline
+  assembly, and text from the gate's inputs. The tests of the run-time
+  defences behind it (stdout comparison, fixed sanitizer settings, the time
+  limit) pass `--skip-cheat-check`, which CI never does.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
 - `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the
@@ -232,13 +268,13 @@ CI does not run these (see `ci/README.md`); run them before changing the gate.
 Not checked yet, mostly left for later tasks:
 
 - **Fuzzing** (task 3).
-- **Deliberate tampering** (task 5). The candidate still runs with the user's
-  permissions, so it could write to the cached headers and library, or to
-  other files. It could also use sanitizer hooks (`__lsan_is_turned_off`),
-  `no_sanitize` attributes, or detect the sanitizer build and behave
-  differently there. The planned defences are running the candidate without
-  write access, checking which symbols it defines and uses, and comparing a
-  second build without sanitizers.
+- **Tampering the anti-cheat check cannot see.** It reads source and
+  symbols, so a candidate that hides an answer (spelled out character by
+  character, or matched by a hash of the input) or misbehaves only on inputs
+  the gate never sends passes it. The differential fuzzer (`fuzz/`) and
+  `metrics.py`'s list of new code no input runs are the defences there. The
+  candidate also still runs with the user's permissions; the anti-cheat
+  check keeps it from calling anything that touches files.
 - **Other files in a rewrite PR.** The checker compiles the candidate against
   the baseline headers and ignores changes to any other file. CI must reject
   rewrite PRs that touch anything besides `json-c/json_tokener.c`.

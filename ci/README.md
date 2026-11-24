@@ -81,5 +81,6 @@ Throwaway PRs, closed after the run (when CI still ran the self-tests):
 - The workflow file is taken from the PR itself, so a PR that edits it can
   change what runs. That is closed by `CODEOWNERS` plus branch protection, not
   by the workflow: such a PR needs Role A's approval.
-- Deliberate tampering by the candidate while it runs (see "Known gaps" in
-  `oracle/README.md`) is cheat-detection work (task 5).
+- The anti-cheat check (`oracle/cheats.py`, run by the `gate` job) reads the
+  candidate's source and symbols; what it cannot see is listed under Known
+  gaps in `oracle/README.md`.
