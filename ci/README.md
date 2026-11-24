@@ -1,13 +1,16 @@
 # ci: the gate on every pull request
 
-Every pull request runs two checks (`.github/workflows/gate.yml`). Once
-branch protection is on, a PR merges into `main` only when both pass and a
-teammate approved it.
+Every pull request runs these checks (`.github/workflows/gate.yml`). Once
+branch protection is on, a PR merges into `main` only when `paths` and `gate`
+pass and a teammate approved it. `fuzz` is not required: a short run can miss
+what a long one finds, so passing it says little; but a failure is always a
+real difference, so treat it as one.
 
 | Check | What it does | Fails when |
 |---|---|---|
 | `paths` | `ci/check_paths.py`: which files the PR changes | the PR breaks a path rule (below) |
 | `gate` | `oracle/check.py` on the PR's `json-c/json_tokener.c` | the tokener behaves differently from the baseline, crashes, leaks, is much slower, or does not build (see `oracle/README.md`) |
+| `fuzz` | rewrite PRs only: `fuzz/fuzz.py` for 5 minutes (not a required check) | the fuzzer found an input where the rewrite answers differently, crashes, leaks or hangs; the input is on the run's summary page (see `fuzz/README.md`) |
 
 CI does not run the checker's and the CI's own tests (`oracle/tests`,
 `ci/tests`). They test the gate, not a rewrite, and on a PR that changes the
@@ -69,6 +72,11 @@ Throwaway PRs, closed after the run (when CI still ran the self-tests):
 `ci/protect-main.sh` has not been run against the real repository yet.
 
 ## Known gaps
+
+- Not yet run on GitHub: the `fuzz` job, and the `de_DE.UTF-8` locale the
+  gate builds since iteration 2 of the gate review. They need clang with
+  libFuzzer and glibc's locale sources (the `locales` package) on the
+  runner; a missing one shows as a checker error, not as a pass.
 
 - The workflow file is taken from the PR itself, so a PR that edits it can
   change what runs. That is closed by `CODEOWNERS` plus branch protection, not
