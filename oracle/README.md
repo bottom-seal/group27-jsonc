@@ -88,10 +88,16 @@ few known cases (`[12-3]`, a UTF-8 character split across calls, `1 2` under
 - `afterreset/error` and `afterreset/next`: stop partway (no end byte), reset;
   the error must then read "success", and a fixed document must parse as on a
   fresh tokener.
+- `oomv<k>`: the k-th allocation inside `json_tokener_parse_verbose()` fails,
+  which also reaches the allocations that create its tokener.
+- `two/strict-depth5` and `two/default-depth64`: two tokeners with different
+  flags and nesting limits, both created before either is used, so settings
+  kept anywhere but in the tokener show up.
 
 **Edge-case API calls, once** (`record_api`): `len` = -2 and `INT_MIN`,
 `json_tokener_new_ex(0)` and `(-1)`, `json_tokener_error_desc()` for -2 to 19,
-and `json_tokener_free(NULL)` / `json_tokener_reset(NULL)`. They are filed one
+`json_tokener_free(NULL)` / `json_tokener_reset(NULL)`, and `json_tokener_new()`
+and `json_tokener_new_ex(5)` with their k-th allocation failing (`oomnew<k>`). They are filed one
 past the last input, and the report calls them "the edge-case API calls".
 
 For each, the recorder writes one answer:
@@ -118,7 +124,7 @@ Inputs, one per line:
   a 206 KB string in an array.
 - `inputs/fuzz.txt`: inputs the differential fuzzer found that the others miss.
 
-A full check is 600,566 answers. `\xNN`
+A full check is 656,203 answers. `\xNN`
 (exactly two hex digits) stands for the byte 0xNN, and a literal backslash
 before `x` is written `\x5c`.
 
@@ -194,7 +200,8 @@ python3 -m pytest oracle/tests     # about 2 minutes
   wrong answers for `len < -1` and `json_tokener_new_ex(0)`.
 - And mistakes that only show when an allocation fails, under the `de_DE`
   locale, right after a reset, on a fuzzer-found input, or as a timeout on the
-  large inputs.
+  large inputs; when creating a tokener runs out of memory, inside
+  `json_tokener_parse_verbose()`, or with two tokeners of different settings.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
 - `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the

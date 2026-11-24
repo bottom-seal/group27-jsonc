@@ -483,6 +483,73 @@ static void record_after_reset(size_t index, const char *buf, size_t n)
 	json_tokener_free(tok);
 }
 
+/* ---- Memory running out in json_tokener_parse_verbose ---------------------------
+ * It creates and frees its own tokener, so failures while creating one are
+ * reached too: "oomv<k>", recorded only when the k-th allocation failed. */
+static void record_parse_verbose_failures(size_t index, const char *buf, size_t n)
+{
+	if (n > OOM_MAX_LEN)
+		return;
+	for (long k = 1; k <= OOM_MAX_POINTS; k++)
+	{
+		enum json_tokener_error err = json_tokener_success;
+		alloc_calls = 0;
+		fail_at = k;
+		json_object *obj = json_tokener_parse_verbose(buf, &err);
+		long made = alloc_calls;
+		fail_at = -1;
+		if (made >= k)
+		{
+			char mode[24];
+			snprintf(mode, sizeof mode, "oomv%ld", k);
+			write_answer(index, mode, "default", obj, (int)err, -1);
+		}
+		else
+			json_object_put(obj);
+		if (made < k)
+			break;
+	}
+}
+
+/* ---- Two tokeners with different settings alive at once ------------------------
+ * A strict one with nesting limit 5 and a lenient one with limit 64, both
+ * created before either is used: settings must belong to each tokener. */
+static void record_two_settings(size_t index, const char *buf, size_t n)
+{
+	json_tokener *a = new_tokener(5, JSON_TOKENER_STRICT);
+	json_tokener *b = new_tokener(64, 0);
+	parse_and_record(index, "two", "strict-depth5", a, buf, (int)n + 1);
+	parse_and_record(index, "two", "default-depth64", b, buf, (int)n + 1);
+	json_tokener_free(a);
+	json_tokener_free(b);
+}
+
+/* ---- Memory running out while creating a tokener --------------------------------
+ * Once, after the edge-case API calls and filed with them: the k-th allocation
+ * in json_tokener_new() and json_tokener_new_ex(5) fails, and each must return
+ * NULL without leaking ("api/oomnew<k>"). */
+static void record_creation_failures(size_t index)
+{
+	for (int d = 0; d < 2; d++)
+		for (long k = 1; k <= 50; k++)
+		{
+			char config[40];
+			alloc_calls = 0;
+			fail_at = k;
+			json_tokener *t = d ? json_tokener_new_ex(5) : json_tokener_new();
+			long made = alloc_calls;
+			fail_at = -1;
+			if (made >= k)
+			{
+				snprintf(config, sizeof config, "api/oomnew%ld/%s", k, d ? "depth5" : "default");
+				write_note(index, config, t ? "a tokener" : "NULL");
+			}
+			json_tokener_free(t);
+			if (made < k)
+				break;
+		}
+}
+
 /* Every way the recorder asks the tokener about one input. buf holds n bytes
  * followed by a NUL. */
 static void record_input(size_t index, const char *buf, size_t n)
@@ -534,6 +601,8 @@ static void record_input(size_t index, const char *buf, size_t n)
 	record_memory_failures(index, buf, n);
 	record_locale(index, buf, n);
 	record_after_reset(index, buf, n);
+	record_parse_verbose_failures(index, buf, n);
+	record_two_settings(index, buf, n);
 }
 
 int main(int argc, char **argv)
@@ -588,6 +657,7 @@ int main(int argc, char **argv)
 	fprintf(out, "#input %zu\n", index);
 	fflush(out);
 	record_api(index);
+	record_creation_failures(index);
 	for (size_t c = 0; c < NCONFIGS; c++)
 	{
 		json_tokener_free(reused[c]);

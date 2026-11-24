@@ -388,6 +388,37 @@ ITERATION2_MISTAKES = {
 }
 
 
+# Mistakes that show only when creating a tokener runs out of memory, inside
+# json_tokener_parse_verbose, with two tokeners of different settings, or on
+# inputs the fuzzer found later.
+ITERATION3_MISTAKES = {
+    "no NULL check after allocating the tokener": (
+        [("\ttok = (struct json_tokener *)calloc(1, sizeof(struct json_tokener));\n\tif (!tok)\n\t\treturn NULL;\n",
+          "\ttok = (struct json_tokener *)calloc(1, sizeof(struct json_tokener));\n")], CRASH, None),
+    "the tokener leaks when its stack cannot be allocated": (
+        [("\tif (!tok->stack)\n\t{\n\t\tfree(tok);\n\t\treturn NULL;\n\t}",
+          "\tif (!tok->stack)\n\t{\n\t\treturn NULL;\n\t}")], CRASH, None),
+    "parse_verbose loses its out-of-memory error": (
+        [("\t\t*error = json_tokener_error_memory;\n\t\treturn NULL;", "\t\treturn NULL;")], DIFFERENT, None),
+    # The depth-5 tokener takes the depth-64 limit and overruns its own stack.
+    "max_depth shared by all tokeners": (
+        [("static unsigned char utf8_replacement_char[3]",
+          "static int g_max_depth;\nstatic unsigned char utf8_replacement_char[3]"),
+         ("tok->max_depth", "g_max_depth", "all")], CRASH, None),
+    # Found by the fuzzer: "~" right after a value inside an object.
+    "object end accepted for any character from '}' up": (
+        [("after:case json_tokener_state_object_sep:", "if (c == '}')", "if (c >= '}')")], DIFFERENT, FUZZ_INPUTS),
+}
+
+
+@pytest.mark.parametrize("mistake", sorted(ITERATION3_MISTAKES))
+def test_mistakes_seen_creating_tokeners_or_with_two_settings_are_caught(tmp_path, mistake):
+    edits, expected, inputs = ITERATION3_MISTAKES[mistake]
+    extra = ("--inputs", str(inputs)) if inputs else ()
+    result = run_check(plant(tmp_path, *edits), *extra)
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mistake", sorted(ITERATION2_MISTAKES))
 def test_mistakes_seen_under_memory_failure_locale_reset_or_fuzzer_inputs_are_caught(tmp_path, mistake):
     edits, expected, inputs = ITERATION2_MISTAKES[mistake]
