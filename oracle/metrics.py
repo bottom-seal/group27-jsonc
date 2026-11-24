@@ -41,7 +41,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check import (BASELINE_TIME_LIMIT, CC, EXIT_BUILD, EXIT_INTERNAL, REPO, SANITIZE,  # noqa: E402
+from check import (BASELINE_TIME_LIMIT, CC, EXIT_BUILD, EXIT_INTERNAL, LINK_WRAP, REPO, SANITIZE,  # noqa: E402
                    Baseline, CheckerError, baseline_tokener_source, build, load_inputs,
                    placed_source, run_recorder, sh)
 from compare import compare, parse_output, report  # noqa: E402
@@ -79,8 +79,8 @@ class CoverageBuild:
     compile_tokener = Baseline.compile_tokener
 
     def link(self, tokener_obj: Path, recorder_obj: Path, out: Path):
-        return sh([CC, *SANITIZE, "--coverage", str(recorder_obj), str(tokener_obj),
-                   "-Wl,--whole-archive", str(self.rest_lib), "-Wl,--no-whole-archive", "-lm", "-o", str(out)])
+        return sh([CC, *SANITIZE, "--coverage", str(recorder_obj), str(tokener_obj), "-Wl,--whole-archive",
+                   str(self.rest_lib), "-Wl,--no-whole-archive", *LINK_WRAP, "-lm", "-o", str(out)])
 
 
 class Coverage:
@@ -247,10 +247,10 @@ def measure(args) -> int:
             return EXIT_BUILD
         new_cov_problem = build(gcov_build, candidate, tmp, "newcov")
 
-        old_runs = [run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT) for _ in range(args.repeat)]
+        old_runs = [run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT, baseline.locale_dir) for _ in range(args.repeat)]
         if not all(finished(run) for run in old_runs):
             raise CheckerError("the baseline recorder failed:\n" + next(r for r in old_runs if not finished(r)).stderr[-3000:])
-        old_cov_run = run_recorder(tmp / "oldcov", inputs, BASELINE_TIME_LIMIT)
+        old_cov_run = run_recorder(tmp / "oldcov", inputs, BASELINE_TIME_LIMIT, baseline.locale_dir)
         old_cov, why = read_coverage(tmp / "oldcov.o")
         if old_cov is None:
             raise CheckerError(f"no coverage for the baseline: {why}\n{old_cov_run.stderr[-3000:]}")
@@ -259,13 +259,13 @@ def measure(args) -> int:
         (tmp / "oldcov").unlink()
 
         limit = max(args.timeout, args.slowdown * old_runs[0].elapsed)  # the gate's own limit
-        new_runs = [run_recorder(tmp / "new", inputs, limit)]
+        new_runs = [run_recorder(tmp / "new", inputs, limit, baseline.locale_dir)]
         while len(new_runs) < args.repeat and finished(new_runs[-1]):
-            new_runs.append(run_recorder(tmp / "new", inputs, limit))
+            new_runs.append(run_recorder(tmp / "new", inputs, limit, baseline.locale_dir))
         if new_cov_problem:
             new_cov, new_cov_why = None, "the candidate does not build with --coverage -O0:\n" + new_cov_problem
         else:
-            run_recorder(tmp / "newcov", inputs, max(args.timeout, args.slowdown * old_cov_run.elapsed))
+            run_recorder(tmp / "newcov", inputs, max(args.timeout, args.slowdown * old_cov_run.elapsed), baseline.locale_dir)
             new_cov, new_cov_why = read_coverage(tmp / "newcov.o")
 
     verdict = compare(old_runs[0], new_runs[0])

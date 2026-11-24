@@ -42,7 +42,8 @@ def test_unchanged_tokener_measures_like_the_baseline(tmp_path):
     assert m["states"]["candidate"] == m["states"]["baseline"]
     assert all(count for _, count in m["states"]["baseline"])  # core.txt enters every state
     assert m["time"]["candidate_s"] > 0 and m["time"]["ratio"] > 0
-    assert "error_memory" in m["answers"]["never"] and m["answers"]["by_error"]["success"] > 0
+    # The recorder makes allocations fail on purpose, so "out of memory" is answered too.
+    assert "error_memory" not in m["answers"]["never"] and m["answers"]["by_error"]["success"] > 0
     assert m["inputs"]["count"] == 3402
     assert result.stdout.startswith("METRICS for ")
 

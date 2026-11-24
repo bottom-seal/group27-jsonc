@@ -21,10 +21,16 @@
  * The answers go to their own file, not stdout, so anything the tokener itself
  * prints cannot corrupt them; the checker compares stdout separately.
  *
+ * Linked with -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=strdup
+ * (see record_memory_failures) and run with LOCPATH pointing at a de_DE.UTF-8
+ * locale (see record_locale); check.py does both.
+ *
  * Adapted from bughunt/mutation/mut_driver.c.
  */
 #include <ctype.h>
 #include <limits.h>
+#include <locale.h>
+#include <sanitizer/lsan_interface.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -356,6 +362,127 @@ static void record_api(size_t index)
 	json_tokener_reset(NULL);
 }
 
+/* ---- Memory running out ------------------------------------------------------
+ * Every malloc, calloc, realloc and strdup in the program, the tokener's
+ * included, goes through these wrappers. While fail_at > 0, the fail_at-th
+ * call fails, as if memory had run out. */
+void *__real_malloc(size_t);
+void *__real_calloc(size_t, size_t);
+void *__real_realloc(void *, size_t);
+char *__real_strdup(const char *);
+static long fail_at = -1, alloc_calls;
+static int fail_now(void)
+{
+	return fail_at > 0 && ++alloc_calls == fail_at;
+}
+void *__wrap_malloc(size_t n)
+{
+	return fail_now() ? NULL : __real_malloc(n);
+}
+void *__wrap_calloc(size_t a, size_t b)
+{
+	return fail_now() ? NULL : __real_calloc(a, b);
+}
+void *__wrap_realloc(void *p, size_t n)
+{
+	return fail_now() ? NULL : __real_realloc(p, n);
+}
+char *__wrap_strdup(const char *str)
+{
+	return fail_now() ? NULL : __real_strdup(str);
+}
+
+#define OOM_MAX_LEN 1000   /* longer inputs are skipped */
+#define OOM_MAX_POINTS 400 /* at most this many failure points per input and way */
+
+/* For k = 1, 2, ...: a fresh tokener, then the k-th allocation of the parse
+ * fails. The answer is recorded ("oom<k>", or "oomb<k>" byte by byte) only
+ * when that failure happened, and the loop stops at the first parse that makes
+ * fewer than k allocations. One call under default and strict flags; byte by
+ * byte under default flags for inputs up to 64 bytes.
+ * The comparison is exact, so the candidate must allocate in the same order
+ * as the baseline (see Known gaps in README.md). */
+static void record_memory_failures(size_t index, const char *buf, size_t n)
+{
+	if (n > OOM_MAX_LEN)
+		return;
+	for (size_t c = 0; c < 2; c++) /* default, strict */
+		for (int bytewise = 0; bytewise < 2; bytewise++)
+		{
+			if (bytewise && (c || n > 64))
+				continue;
+			for (long k = 1; k <= OOM_MAX_POINTS; k++)
+			{
+				json_tokener *tok = new_tokener(0, CONFIGS[c].flags);
+				json_object *obj = NULL;
+				alloc_calls = 0;
+				fail_at = k;
+				if (!bytewise)
+					obj = json_tokener_parse_ex(tok, buf, (int)n + 1);
+				else
+					for (size_t i = 0; i <= n && !obj; i++) /* i == n: the end byte */
+					{
+						obj = json_tokener_parse_ex(tok, buf + i, 1);
+						if (json_tokener_get_error(tok) != json_tokener_continue)
+							break;
+					}
+				long made = alloc_calls;
+				fail_at = -1;
+				if (made >= k)
+				{
+					char mode[24];
+					snprintf(mode, sizeof mode, bytewise ? "oomb%ld" : "oom%ld", k);
+					write_answer(index, mode, CONFIGS[c].name, obj, (int)json_tokener_get_error(tok),
+					             (long)json_tokener_get_parse_end(tok));
+				}
+				else
+					json_object_put(obj);
+				json_tokener_free(tok);
+				if (made < k)
+					break;
+			}
+		}
+}
+
+/* ---- A locale with a decimal comma --------------------------------------------
+ * strtod reads numbers by the caller's locale, so json-c switches to the C
+ * locale's number format inside each call and back afterwards. Parse under
+ * de_DE.UTF-8, whose decimal point is ',', and check that the caller's locale
+ * is back after the call. */
+static locale_t de_locale;
+
+static void record_locale(size_t index, const char *buf, size_t n)
+{
+	for (size_t c = 0; c < 2; c++) /* default, strict */
+	{
+		char config[48];
+		json_tokener *tok = new_tokener(0, CONFIGS[c].flags);
+		locale_t before = uselocale(de_locale);
+		json_object *obj = json_tokener_parse_ex(tok, buf, (int)n + 1);
+		int restored = uselocale((locale_t)0) == de_locale;
+		uselocale(before);
+		write_answer(index, "de_DE", CONFIGS[c].name, obj, (int)json_tokener_get_error(tok),
+		             (long)json_tokener_get_parse_end(tok));
+		snprintf(config, sizeof config, "de_DE-restored/%s", CONFIGS[c].name);
+		write_note(index, config, restored ? "yes" : "no");
+		json_tokener_free(tok);
+	}
+}
+
+/* ---- What a reset leaves behind ------------------------------------------------
+ * Stop partway (no end byte), reset: the error must read "success", and a
+ * fixed document must parse as on a fresh tokener. */
+static void record_after_reset(size_t index, const char *buf, size_t n)
+{
+	static const char doc[] = "[1,{\"a\":[\"x\",2.5]},null]";
+	json_tokener *tok = new_tokener(0, 0);
+	json_object_put(json_tokener_parse_ex(tok, buf, (int)n));
+	json_tokener_reset(tok);
+	write_answer(index, "afterreset", "error", NULL, (int)json_tokener_get_error(tok), -1);
+	parse_and_record(index, "afterreset", "next", tok, doc, (int)sizeof doc);
+	json_tokener_free(tok);
+}
+
 /* Every way the recorder asks the tokener about one input. buf holds n bytes
  * followed by a NUL. */
 static void record_input(size_t index, const char *buf, size_t n)
@@ -404,6 +531,9 @@ static void record_input(size_t index, const char *buf, size_t n)
 	record_pieces(index, buf, n);
 	record_documents(index, buf);
 	record_turns(index, buf, n);
+	record_memory_failures(index, buf, n);
+	record_locale(index, buf, n);
+	record_after_reset(index, buf, n);
 }
 
 int main(int argc, char **argv)
@@ -411,6 +541,15 @@ int main(int argc, char **argv)
 	if (argc != 2 || !(out = fopen(argv[1], "w")))
 	{
 		fprintf(stderr, "usage: recorder ANSWERS_FILE < inputs\n");
+		return 3;
+	}
+	/* glibc keeps the LOCPATH list it allocates here for the process's life */
+	__lsan_disable();
+	de_locale = newlocale(LC_ALL_MASK, "de_DE.UTF-8", (locale_t)0);
+	__lsan_enable();
+	if (!de_locale)
+	{
+		fprintf(stderr, "recorder: no de_DE.UTF-8 locale (check.py builds one and sets LOCPATH)\n");
 		return 3;
 	}
 	for (size_t c = 0; c < NCONFIGS; c++)
@@ -454,6 +593,7 @@ int main(int argc, char **argv)
 		json_tokener_free(reused[c]);
 		json_tokener_free(doc_tok[c]);
 	}
+	freelocale(de_locale);
 	fprintf(out, "#done %zu\n", index);
 	return fclose(out) == 0 ? 0 : 3;
 }

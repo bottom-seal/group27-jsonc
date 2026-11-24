@@ -362,6 +362,51 @@ def test_mistakes_seen_only_across_calls_or_through_the_api_are_caught(tmp_path,
     assert result.returncode == expected, result.stdout + result.stderr
 
 
+LARGE_INPUTS = REPO / "oracle" / "inputs" / "large.txt"
+FUZZ_INPUTS = REPO / "oracle" / "inputs" / "fuzz.txt"
+
+# Mistakes that show only when an allocation fails, under a locale with a
+# decimal comma, right after a reset, or on inputs the fuzzer found. Entry:
+# (edits, exit code, input file or None for core.txt).
+ITERATION2_MISTAKES = {
+    "running out of memory for an object reported as a syntax error": (
+        [("current = json_object_new_object();\n\t\t\t\tif (current == NULL)\n\t\t\t\t{\n"
+          "\t\t\t\t\ttok->err = json_tokener_error_memory;",
+          "current = json_object_new_object();\n\t\t\t\tif (current == NULL)\n\t\t\t\t{\n"
+          "\t\t\t\t\ttok->err = json_tokener_error_parse_unexpected;")], DIFFERENT, None),
+    "numbers read in the caller's locale": ([("\t\tuselocale(c_numeric_locale);\n", "")], DIFFERENT, None),
+    "the caller's locale not put back": ([("\tuselocale(oldlocale);\n", "\t(void)oldlocale;\n")], DIFFERENT, None),
+    "a reset leaves the error set": (
+        [("\ttok->depth = 0;\n\ttok->err = json_tokener_success;\n\ttok->high_surrogate = 0;\n}",
+          "\ttok->depth = 0;\n\ttok->high_surrogate = 0;\n}")], DIFFERENT, None),
+    # Found by the differential fuzzer: no core input has a 9 right after the
+    # point of a STRICT fraction.
+    "strict fraction rejects a 9 after the point": (
+        [("if (*num == '.')\n\t\t\t\t{\n\t\t\t\t\tnum++;\n\t\t\t\t\tif (!(*num >= '0' && *num <= '9'))",
+          "if (*num == '.')\n\t\t\t\t{\n\t\t\t\t\tnum++;\n\t\t\t\t\tif (!(*num >= '0' && *num < '9'))")],
+        DIFFERENT, FUZZ_INPUTS),
+}
+
+
+@pytest.mark.parametrize("mistake", sorted(ITERATION2_MISTAKES))
+def test_mistakes_seen_under_memory_failure_locale_reset_or_fuzzer_inputs_are_caught(tmp_path, mistake):
+    edits, expected, inputs = ITERATION2_MISTAKES[mistake]
+    extra = ("--inputs", str(inputs)) if inputs else ()
+    result = run_check(plant(tmp_path, *edits), *extra)
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_work_that_grows_with_the_square_of_a_string_times_out_on_large_inputs(tmp_path):
+    # Rescans the string read so far at every character: answers are the same,
+    # and on core.txt (at most 1,000 bytes) it is not even noticeably slower.
+    slow = plant(tmp_path, ("after:case json_tokener_state_string:", "\t\t\t\tif (c == tok->quote_char)\n",
+                            "\t\t\t\t{ volatile const char *p = case_start; while (p < str) p++; }\n"
+                            "\t\t\t\tif (c == tok->quote_char)\n"))
+    result = run_check(slow, "--inputs", str(LARGE_INPUTS), "--timeout", "5", "--slowdown", "5")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "timed out" in result.stdout
+
+
 def test_a_mistake_in_the_api_calls_is_reported_as_such(tmp_path):
     result = run_check(plant(tmp_path, *MULTI_CALL_MISTAKES["len < -1 gives the wrong error"][0]))
     assert result.returncode == 1, result.stdout + result.stderr

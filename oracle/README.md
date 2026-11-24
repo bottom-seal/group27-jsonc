@@ -11,9 +11,10 @@ python3 oracle/check.py                     # checks json-c/json_tokener.c in th
 python3 oracle/check.py path/to/json_tokener.c
 ```
 
-Needs `gcc`, `cmake`, `git` (a clone with full history) and Python 3. The first
-run builds json-c once into `.build/oracle/` (about 10 seconds); after that a
-check takes a few seconds.
+Needs `gcc`, `cmake`, `git` (a clone with full history), glibc's `localedef`
+with the `de_DE` locale sources (Ubuntu/Debian: the `locales` package) and
+Python 3. The first run builds json-c and a `de_DE.UTF-8` locale once into
+`.build/oracle/` (about 10 seconds); after that a check takes about 20 seconds.
 
 Options: `--inputs FILE` (repeat it for several files; default: every
 `oracle/inputs/*.txt`),
@@ -72,6 +73,22 @@ the one-call answer: the baseline itself answers differently in pieces in a
 few known cases (`[12-3]`, a UTF-8 character split across calls, `1 2` under
 `STRICT`; see `bughunt/README.md`), and a rewrite must keep those.
 
+**When something around the parse goes wrong:**
+
+- `oom<k>` and `oomb<k>`: the k-th memory allocation during the parse fails on
+  purpose, for k = 1, 2, … until a parse makes fewer than k allocations (at
+  most 400). One call under `default` and `strict`, and byte by byte (`oomb`)
+  under `default` for inputs up to 64 bytes; inputs over 1,000 bytes are
+  skipped. The recorder is linked with `-Wl,--wrap=malloc` (and `calloc`,
+  `realloc`, `strdup`), so the tokener's own allocations go through it.
+- `de_DE` and `de_DE-restored`: the input parsed under `de_DE.UTF-8`, whose
+  decimal point is `,`, under `default` and `strict`, and whether the caller's
+  locale is back after the call. json-c must switch to the C number format
+  inside each call, or `strtod` reads `1.5` the German way.
+- `afterreset/error` and `afterreset/next`: stop partway (no end byte), reset;
+  the error must then read "success", and a fixed document must parse as on a
+  fresh tokener.
+
 **Edge-case API calls, once** (`record_api`): `len` = -2 and `INT_MIN`,
 `json_tokener_new_ex(0)` and `(-1)`, `json_tokener_error_desc()` for -2 to 19,
 and `json_tokener_free(NULL)` / `json_tokener_reset(NULL)`. They are filed one
@@ -89,9 +106,19 @@ For each, the recorder writes one answer:
 The candidate must give exactly the baseline's set of answers. Answers go to
 their own file, and what the process prints to stdout is compared separately.
 
-Inputs, one per line: `inputs/core.txt` is the bug hunt's input set (3,402
-inputs, one of them the empty line), and `inputs/multi.txt` holds 12 texts with
-several documents each, for `stream`. A full check is 510,387 answers. `\xNN`
+Inputs, one per line:
+
+- `inputs/core.txt`: the bug hunt's input set (3,402 inputs, one of them the
+  empty line).
+- `inputs/multi.txt`: 12 texts with several documents each, for `stream`.
+- `inputs/large.txt`: 9 texts from 62 bytes to 300 KB, so that work growing
+  faster than the length shows up as a timeout: a 200 KB string, 300 KB of
+  `\u00e9` escapes, a 20,000-digit number, 200 KB of spaces, a 200 KB comment,
+  an array of 50,000 numbers, an object with 20,000 keys, 31 nested arrays and
+  a 206 KB string in an array.
+- `inputs/fuzz.txt`: inputs the differential fuzzer found that the others miss.
+
+A full check is 600,566 answers. `\xNN`
 (exactly two hex digits) stands for the byte 0xNN, and a literal backslash
 before `x` is written `\x5c`.
 
@@ -105,7 +132,9 @@ before `x` is written `\x5c`.
    build. Both versions link against it with `--whole-archive`, as the real
    library build does, so they can only differ in the tokener.
 3. **Both tokeners** are compiled with the exact command cmake uses, in a
-   temporary folder outside the cache, then linked with `recorder.c`.
+   temporary folder outside the cache, then linked with `recorder.c` and its
+   allocation wrappers. The `de_DE.UTF-8` locale is built once into
+   `.build/oracle/locale/`, and the recorder runs with `LOCPATH` pointing there.
 4. **The baseline runs first**; its time sets the candidate's time limit, and
    its binary is deleted before the candidate runs. Both run with fixed
    sanitizer settings, in their own process group, which is killed afterwards.
@@ -163,6 +192,9 @@ python3 -m pytest oracle/tests     # about 2 minutes
   not reset or not kept between calls, values shared by all tokeners, the
   trailing-characters check rewritten for the flag sets without `STRICT`, and
   wrong answers for `len < -1` and `json_tokener_new_ex(0)`.
+- And mistakes that only show when an allocation fails, under the `de_DE`
+  locale, right after a reset, on a fuzzer-found input, or as a timeout on the
+  large inputs.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
 - `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the
@@ -175,8 +207,6 @@ python3 -m pytest oracle/tests     # about 2 minutes
 Not checked yet, mostly left for later tasks:
 
 - **Fuzzing** (task 3).
-- **Large inputs.** The longest input is 1,000 bytes, so code that only gets
-  slow on long texts (quadratic in the length, say) passes the time limit.
 - **Deliberate tampering** (task 5). The candidate still runs with the user's
   permissions, so it could write to the cached headers and library, or to
   other files. It could also use sanitizer hooks (`__lsan_is_turned_off`),
@@ -187,9 +217,10 @@ Not checked yet, mostly left for later tasks:
 - **Other files in a rewrite PR.** The checker compiles the candidate against
   the baseline headers and ignores changes to any other file. CI must reject
   rewrite PRs that touch anything besides `json-c/json_tokener.c`.
-- **Locale.** The recorder runs in the C locale, so a rewrite that drops
-  json-c's switch to the C number format would only misbehave under a locale
-  with a decimal comma (such as `de_DE`), which is not installed here.
-- **Bugs 5–8** in `bughunt/README.md` and allocation-failure paths in general:
-  an answer comparison cannot see out-of-memory handling, threads, or
-  memory growth.
+- **Allocation failures are compared exactly.** Under a failed allocation the
+  candidate must give the baseline's answer for the same k, so a correct
+  rewrite that allocates in a different order (one buffer fewer, say) fails.
+  A fairer rule (no crash or leak, and either the baseline's answer or an
+  out-of-memory error) is not built yet.
+- **Threads and memory growth** (bugs 8 and 7 in `bughunt/README.md`): an
+  answer comparison cannot see data races or how much memory is held.
