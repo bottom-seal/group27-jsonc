@@ -155,3 +155,28 @@ def test_long_inputs_are_shortened_in_the_report():
     first_line = text.split("\n")[0]
     assert len(first_line) < 300
     assert "(5003 bytes)" in first_line
+
+
+def test_answers_filed_after_the_last_input_are_named_as_the_api_calls():
+    # The recorder files its edge-case API calls one past the last input.
+    old = Run(BASELINE.replace("#done 3", "3\tapi/len=-2\tn\t15 buffer size overflow\t0\t-\n#done 3"), 0)
+    new = Run(BASELINE.replace("#done 3", "3\tapi/len=-2\tn\t3 unexpected end of data\t0\t-\n#done 3"), 0)
+    text = report(compare(old, new), INPUTS)
+    assert "the edge-case API calls (after the last input)" in text
+    assert "input #4" not in text
+
+
+def test_a_crash_is_placed_on_the_input_the_recorder_had_started():
+    # An answer about one input can be written while the next is worked on
+    # (two tokeners taking turns), so a missing answer for input 1 does not
+    # mean the crash happened there: the last "#input" line decides.
+    new = Run(
+        "#input 0\n" + "\n".join("\t".join(map(str, r)) for r in (
+            (0, "default", "a[i]", "0 success", 3, "[1]"),)) + "\n#input 1\n"
+        + "\t".join(map(str, (1, "default", "a[i]", "0 success", 3, "[2]"))) + "\n",
+        returncode=1,
+        stderr="==1==ERROR: AddressSanitizer: SEGV on unknown address",
+    )
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "crash" and verdict.crash_index == 1
+    assert "on input #2: [2]" in report(verdict, INPUTS)

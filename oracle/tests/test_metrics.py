@@ -35,7 +35,7 @@ def line_of(path: Path, text: str) -> int:
 def test_unchanged_tokener_measures_like_the_baseline(tmp_path):
     result, m = run_metrics(candidate(tmp_path), tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert m["verdict"]["status"] == "pass" and m["verdict"]["checks"] == 98658
+    assert m["verdict"]["status"] == "pass" and m["verdict"]["checks"] > 0
     assert m["coverage"]["candidate"] == m["coverage"]["baseline"]
     assert 0 < m["coverage"]["baseline"]["lines_run"] < m["coverage"]["baseline"]["lines"]
     assert m["unrun"]["same"] and not m["unrun"]["lost"] and not m["unrun"]["new"]

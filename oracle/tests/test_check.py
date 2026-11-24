@@ -289,6 +289,85 @@ def test_mistakes_in_other_entry_points_are_caught(tmp_path, mistake):
     assert result.returncode == expected, result.stdout + result.stderr
 
 
+def plant(tmp_path: Path, *edits) -> Path:
+    """The baseline tokener with several edits applied in order. An edit is
+    (old, new) for an exact text found once, (old, new, "all") to replace every
+    occurrence, or ("after:" + anchor, old, new) for the first `old` after the
+    unique `anchor`."""
+    src = baseline_source()
+    for edit in edits:
+        if edit[0].startswith("after:"):
+            anchor, old, new = edit[0][len("after:"):], edit[1], edit[2]
+            assert src.count(anchor) == 1, f"anchor must be unique: {anchor!r}"
+            at = src.index(old, src.index(anchor))
+            src = src[:at] + new + src[at + len(old):]
+        elif len(edit) == 3:
+            assert edit[0] in src, edit[0]
+            src = src.replace(edit[0], edit[1])
+        else:
+            assert src.count(edit[0]) == 1, f"replacement anchor must be unique: {edit[0]!r}"
+            src = src.replace(edit[0], edit[1])
+    path = tmp_path / "json_tokener.c"
+    path.write_text(src)
+    return path
+
+
+CALL_START = "\ttok->char_offset = 0;\n\ttok->err = json_tokener_success;\n"
+SAVE_STRING_SO_FAR = ("printbuf_memappend_checked(tok->pb, case_start,\n"
+                      "\t\t\t\t\t                           str - case_start);\n\t\t\t\t\tgoto out;")
+
+# Mistakes that show only when a tokener is used for more than one call or in
+# a way no input file can express: text arriving in pieces, several documents
+# on one reader, two readers taking turns, the two flag sets without STRICT
+# that use ALLOW_TRAILING_CHARS, and unusual API arguments. All of these passed
+# the gate when it only made one call per fresh tokener. Entry: (edits, exit code).
+MULTI_CALL_MISTAKES = {
+    # The success path must reset level 0 for the next document on the same tokener.
+    "level 0 not reset after a success": (
+        [("for (ii = tok->depth; ii >= 0; ii--)", "for (ii = tok->depth; ii > 0; ii--)")], DIFFERENT),
+    "string forgets the text read so far when a call ends inside it": (
+        [("after:case json_tokener_state_string:", SAVE_STRING_SO_FAR, "goto out;")], DIFFERENT),
+    "resumed number accepts a + sign": ([("int pos_sign_ok = 0;", "int pos_sign_ok = 1;")], DIFFERENT),
+    # Values that must survive between calls, cleared at the start of each call.
+    "position inside true/null/\\u cleared at every call": (
+        [(CALL_START, CALL_START + "\ttok->st_pos = 0;\n")], DIFFERENT),
+    "number's is_double cleared at every call": ([(CALL_START, CALL_START + "\ttok->is_double = 0;\n")], DIFFERENT),
+    "text so far dropped at every call": ([(CALL_START, CALL_START + "\tprintbuf_reset(tok->pb);\n")], DIFFERENT),
+    # A per-tokener value moved to a static: one document at a time can't tell.
+    "quote character shared by all tokeners": (
+        [("static unsigned char utf8_replacement_char[3]",
+          "static char g_quote_char;\nstatic unsigned char utf8_replacement_char[3]"),
+         ("tok->quote_char", "g_quote_char", "all")], DIFFERENT),
+    "st_pos shared by all tokeners": (
+        [("static unsigned char utf8_replacement_char[3]",
+          "static int g_st_pos;\nstatic unsigned char utf8_replacement_char[3]"),
+         ("tok->st_pos", "g_st_pos", "all")], DIFFERENT),
+    # Same answers on the 6 flag sets with STRICT or none; differs only for
+    # ALLOW_TRAILING_CHARS without STRICT.
+    "trailing-characters check written as an xor": (
+        [("(tok->flags & (JSON_TOKENER_STRICT | JSON_TOKENER_ALLOW_TRAILING_CHARS)) ==\n\t        JSON_TOKENER_STRICT",
+          "(!(tok->flags & JSON_TOKENER_STRICT) != !(tok->flags & JSON_TOKENER_ALLOW_TRAILING_CHARS))")], DIFFERENT),
+    "len < -1 gives the wrong error": (
+        [("tok->err = json_tokener_error_size;", "tok->err = json_tokener_error_parse_eof;")], DIFFERENT),
+    # A tokener with no room for even one level: ASan stops it.
+    "json_tokener_new_ex(0) returns a tokener": (
+        [("\tif (depth < 1)\n\t\treturn NULL;", "\tif (depth < 0)\n\t\treturn NULL;")], CRASH),
+}
+
+
+@pytest.mark.parametrize("mistake", sorted(MULTI_CALL_MISTAKES))
+def test_mistakes_seen_only_across_calls_or_through_the_api_are_caught(tmp_path, mistake):
+    edits, expected = MULTI_CALL_MISTAKES[mistake]
+    result = run_check(plant(tmp_path, *edits))
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_a_mistake_in_the_api_calls_is_reported_as_such(tmp_path):
+    result = run_check(plant(tmp_path, *MULTI_CALL_MISTAKES["len < -1 gives the wrong error"][0]))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "the edge-case API calls (after the last input)" in result.stdout
+
+
 def test_deleting_a_public_function_is_a_build_error(tmp_path):
     # json_tokener_parse() and json_tokener_parse_verbose() removed.
     src = candidate(tmp_path)

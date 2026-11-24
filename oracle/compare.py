@@ -59,6 +59,7 @@ class Output:
     records: dict
     problems: list
     done: "int | None"  # inputs read, from the "#done" line; None if it never came
+    started: "int | None" = None  # the last "#input" line: the input being worked on
 
 
 def parse_output(text: str) -> Output:
@@ -70,6 +71,8 @@ def parse_output(text: str) -> Output:
         fields = line.split("\t", len(FIELDS) + 1)
         if line.startswith("#done ") and line[6:].isdigit() and out.done is None:
             out.done = int(line[6:])
+        elif line.startswith("#input ") and line[7:].isdigit():
+            out.started = int(line[7:])
         elif len(fields) != len(FIELDS) + 2 or not fields[0].isdigit():
             out.problems.append(f"unreadable line: {line[:200]}")
         elif (int(fields[0]), fields[1]) in out.records:
@@ -104,8 +107,14 @@ def compare(old: Run, new: Run) -> Verdict:
     if reason:
         verdict.crash_reason = reason
         verdict.crash_log = new.stderr
+        # The input the candidate was working on: the last "#input" line it
+        # wrote, or, for output without those lines, the first input with a
+        # missing answer. Nothing missing means it stopped after the last answer.
         missing = [index for (index, config) in base.records if (index, config) not in cand.records]
-        verdict.crash_index = min(missing) if missing else None
+        if not missing:
+            verdict.crash_index = None
+        else:
+            verdict.crash_index = cand.started if cand.started is not None else min(missing)
     return verdict
 
 
@@ -131,6 +140,14 @@ def _input_text(inputs: list, index: int, limit: int = 120) -> str:
         return "(no such input)"
     text = inputs[index]
     return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} bytes)"
+
+
+def _which(inputs: list, index: int) -> str:
+    """Name the input an answer belongs to. The recorder files its edge-case
+    API calls, which use no input, one past the last input."""
+    if index == len(inputs):
+        return "the edge-case API calls (after the last input)"
+    return f"input #{index + 1}: {_input_text(inputs, index)}"
 
 
 def _answer(values: "tuple | None") -> str:
@@ -166,7 +183,7 @@ def _crash_report(verdict: Verdict, inputs: list, log_lines: int = 40) -> list:
     if verdict.crash_index is None:
         where = "after answering every input (at exit)"
     else:
-        where = f"on input #{verdict.crash_index + 1}: {_input_text(inputs, verdict.crash_index)}"
+        where = f"on {_which(inputs, verdict.crash_index)}"
     lines = [f"CRASH: candidate {verdict.crash_reason} {where}"]
     excerpt = _log_excerpt(verdict.crash_log, log_lines)
     if excerpt:
@@ -209,7 +226,7 @@ def _difference_report(verdict: Verdict, inputs: list, max_examples: int) -> lis
         lines += ["", f"Smallest differing inputs ({len(shown)} of {len(by_input)}):"]
         for index in shown:
             first, *rest = by_input[index]
-            lines.append(f"  input #{index + 1}: {_input_text(inputs, index)}")
+            lines.append(f"  {_which(inputs, index)}")
             lines.append(f"    config {first.config}" + (f" (also {', '.join(m.config for m in rest)})" if rest else ""))
             lines.append(f"      baseline:  {_answer(first.old)}")
             lines.append(f"      candidate: {_answer(first.new)}")

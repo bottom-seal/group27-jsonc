@@ -34,15 +34,48 @@ behaviour, so it fails the check.
 
 ## What is compared
 
-Each input is given to the tokener 29 ways (`record_input` in `recorder.c`):
+Each input is given to the tokener in these ways (`record_input` in
+`recorder.c`).
+
+**One call:**
 
 - `oneshot`, `noterm` (no final NUL, so incomplete input answers "continue"),
   `minus1` (`len = -1`, as `json_tokener_parse()` uses) and `reuse` (one
-  tokener for all inputs, `json_tokener_reset()` after each), each under 6 flag
-  settings: `default`, `strict`, `utf8`, `strict+utf8`, `strict+trailing`,
-  `strict+trailing+utf8`
+  tokener for all inputs, `json_tokener_reset()` after each), each under all 8
+  combinations of `STRICT`, `VALIDATE_UTF8` and `ALLOW_TRAILING_CHARS`:
+  `default`, `strict`, `utf8`, `strict+utf8`, `strict+trailing`,
+  `strict+trailing+utf8`, `trailing`, `trailing+utf8`
 - `parse` (`json_tokener_parse()`) and `verbose` (`json_tokener_parse_verbose()`)
 - `depth1`, `depth5`, `depth64` (`json_tokener_new_ex()` with that depth)
+
+**More than one call:**
+
+- `bytewise`: one byte per call, under all 8 flag settings, and
+  `bytewise-depth5` with nesting limit 5. Texts over 4,096 bytes go in
+  4,096-byte pieces.
+- `split<k>`: texts up to 64 bytes cut in two after byte k, for every k, under
+  `default`, `strict` and `utf8`.
+- `stream<d>`: one tokener per flag setting reads document after document from
+  the same text, without a reset in between (up to 8). It is reset before each
+  input and stops at an embedded NUL byte: past either point the baseline
+  itself leaks after bug-hunt finding 1.
+- `turns-with-previous` and `turns-with-next`: this input and the previous one
+  on two tokeners, fed one byte at a time in turns, under `default`, `strict`
+  and `utf8`. Each answer is filed under the input it is about. (The recorder
+  writes `#input N` before each input, so a crash is still reported on the
+  input it was working on.)
+- Every multi-call way also records how many calls it took (`bytewise-calls`,
+  `split<k>-calls`).
+
+Text in pieces is compared with the baseline fed the same pieces, never with
+the one-call answer: the baseline itself answers differently in pieces in a
+few known cases (`[12-3]`, a UTF-8 character split across calls, `1 2` under
+`STRICT`; see `bughunt/README.md`), and a rewrite must keep those.
+
+**Edge-case API calls, once** (`record_api`): `len` = -2 and `INT_MIN`,
+`json_tokener_new_ex(0)` and `(-1)`, `json_tokener_error_desc()` for -2 to 19,
+and `json_tokener_free(NULL)` / `json_tokener_reset(NULL)`. They are filed one
+past the last input, and the report calls them "the edge-case API calls".
 
 For each, the recorder writes one answer:
 
@@ -56,8 +89,9 @@ For each, the recorder writes one answer:
 The candidate must give exactly the baseline's set of answers. Answers go to
 their own file, and what the process prints to stdout is compared separately.
 
-`inputs/core.txt` is the bug hunt's input set: 3,402 inputs (one of them the
-empty line), so a full check is 98,658 answers. One input per line; `\xNN`
+Inputs, one per line: `inputs/core.txt` is the bug hunt's input set (3,402
+inputs, one of them the empty line), and `inputs/multi.txt` holds 12 texts with
+several documents each, for `stream`. A full check is 510,387 answers. `\xNN`
 (exactly two hex digits) stands for the byte 0xNN, and a literal backslash
 before `x` is written `\x5c`.
 
@@ -125,6 +159,10 @@ python3 -m pytest oracle/tests     # about 2 minutes
   build errors, symbol clashes and an `#include` of the baseline; printing to
   stdout and faking the end of the run; a tampered cache; two first runs at
   once; and broken input files.
+- It also plants mistakes that only show across calls or through the API: state
+  not reset or not kept between calls, values shared by all tokeners, the
+  trailing-characters check rewritten for the flag sets without `STRICT`, and
+  wrong answers for `len < -1` and `json_tokener_new_ex(0)`.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
 - `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the
@@ -136,7 +174,9 @@ python3 -m pytest oracle/tests     # about 2 minutes
 
 Not checked yet, mostly left for later tasks:
 
-- **Feeding input in pieces** (task 2) and **fuzzing** (task 3).
+- **Fuzzing** (task 3).
+- **Large inputs.** The longest input is 1,000 bytes, so code that only gets
+  slow on long texts (quadratic in the length, say) passes the time limit.
 - **Deliberate tampering** (task 5). The candidate still runs with the user's
   permissions, so it could write to the cached headers and library, or to
   other files. It could also use sanitizer hooks (`__lsan_is_turned_off`),
