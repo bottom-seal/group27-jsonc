@@ -77,10 +77,45 @@ before `x` is written `\x5c`.
    sanitizer settings, in their own process group, which is killed afterwards.
 5. **`compare.py`** compares the answers and prints the report.
 
+## Metrics (report only)
+
+```bash
+python3 oracle/metrics.py                          # the working tree's json_tokener.c
+python3 oracle/metrics.py path/to/json_tokener.c --json metrics.json
+```
+
+`metrics.py` makes the same comparison as `check.py` and prints its verdict
+line, then numbers about what the gate's inputs exercise. They never change the
+verdict: the exit code is 0 whenever the report is written (3 if the candidate
+does not build, 4 if the script cannot run). A run takes a few seconds.
+
+- **Time**: best of `--repeat` (3) runs of the gate's own build, for the
+  baseline and the candidate, and the ratio. The gate fails a candidate only
+  above 20 times the baseline's time.
+- **Coverage**: lines and branches of `json_tokener.c` that the inputs run, for
+  both versions and per function, from a second build with gcov (the tokener
+  at `-O0` without sanitizers, so the counts follow the source).
+- **Unrun lines** of the candidate, matched to the baseline's lines (ignoring
+  indentation) and split three ways:
+  - *unrun in the baseline too*: mostly out-of-memory handling;
+  - *ran in the baseline, not here*: the inputs no longer reach code they
+    reached before;
+  - *new or changed code*: no input runs it, so the gate says nothing about it.
+    A special case hidden in a rewrite shows up here.
+- **States**: how often the inputs enter each state of `json_tokener_parse_ex`,
+  for a source that keeps the `case json_tokener_state_...:` labels.
+- **Answers**: which error codes the baseline's answers contain, and which never
+  appear.
+- **Inputs**: how many, the longest, how many are over 1,000 bytes.
+
+Coverage shows which code the inputs reach, not how well the answers there are
+checked: code can run on every input and still be wrong in a way no input
+shows. Needs gcc's `gcov` (set `GCOV` to use another).
+
 ## Tests
 
 ```bash
-python3 -m pytest oracle/tests     # about 90 seconds
+python3 -m pytest oracle/tests     # about 2 minutes
 ```
 
 - `tests/test_check.py` runs the whole checker on planted versions of
@@ -92,6 +127,10 @@ python3 -m pytest oracle/tests     # about 90 seconds
   once; and broken input files.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
+- `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the
+  same numbers as the baseline); a special case no input reaches (listed as new
+  code the gate never runs, though the verdict is PASS); a change that stops
+  the inputs reaching some states; a crash; and a build error.
 
 ## Known gaps
 
