@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "explainer",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-parse-ex-20261124-150420/candidate.archify.md",
+    "sha256": "b15beb726ebe88c276218d91586dc24812c955a09f93539e031186f712f2fd38",
+    "bytes": 11448
+  },
+  "artifact": {
+    "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-parse-ex-20261124-150420/parse-ex.html",
+    "sha256": "b5e3448b04c1e3850ad241df05f13ab419871328d50ee5ad15763a9893677407",
+    "bytes": 2735954
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "not-run"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-parse-ex-20261124-150420/parse-ex.finalize.json",
+    "summaryReceipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-parse-ex-20261124-150420/parse-ex.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1817,
+  "browserCheck": {
+    "requested": false,
+    "ran": false
+  }
+}

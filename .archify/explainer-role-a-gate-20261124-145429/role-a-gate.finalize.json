@@ -1,0 +1,687 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "explainer",
+  "quality": "showcase",
+  "startedAt": "2026-11-24T06:55:23.660Z",
+  "specification": {
+    "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/candidate.archify.md",
+    "sha256": "dd56288faa8626e6ee51853d97378996cf73bba953bc2f8d2a243a9fabdb6945",
+    "bytes": 10872
+  },
+  "artifact": {
+    "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+    "sha256": "839e6b397e684cb3bf9f73db5802463edfbb249e0017352f70acbaa7b2f54df9",
+    "bytes": 1640291
+  },
+  "stages": {
+    "browser-check": {
+      "status": "not-run",
+      "execution": "not-requested"
+    },
+    "validate": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": null,
+      "execution": "embedded-in-deliver",
+      "command": [
+        "/home/lmz/.nvm/versions/node/v24.21.0/bin/node",
+        "/home/lmz/.claude/skills/archify/bin/archify.mjs",
+        "deliver",
+        "explainer",
+        "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/candidate.archify.md",
+        "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "/home/lmz/software_testing/group27-jsonc",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "validate",
+        "specification": {
+          "sha256": "dd56288faa8626e6ee51853d97378996cf73bba953bc2f8d2a243a9fabdb6945",
+          "bytes": 10872
+        },
+        "validation": {
+          "checksPassed": 4,
+          "checkCount": 4,
+          "compositionProfile": "showcase",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    "deliver": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 908,
+      "command": [
+        "/home/lmz/.nvm/versions/node/v24.21.0/bin/node",
+        "/home/lmz/.claude/skills/archify/bin/archify.mjs",
+        "deliver",
+        "explainer",
+        "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/candidate.archify.md",
+        "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "/home/lmz/software_testing/group27-jsonc",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "receiptId": "360fe45b-6364-42b3-af94-3257ad390ac3",
+        "ok": true,
+        "command": "deliver",
+        "type": "explainer",
+        "input": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/candidate.archify.md",
+        "output": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+        "explainer": {
+          "preparedSha256": "00d01c3a28f3206071f3bddd42cda495995f7d0db0a99763b01984a1d1c413d2",
+          "dependencies": [
+            {
+              "kind": "repository",
+              "id": "recorder",
+              "path": "oracle/recorder.c",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "bb322a20283cff32998d9873a0fc1b35f27870f1ba5d6963b140091d2d06a840",
+              "bytes": 7722
+            },
+            {
+              "kind": "repository",
+              "id": "check",
+              "path": "oracle/check.py",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "f9ec12408a5e59a074669e57c4105cb4d7abc7e0b335bf7c79d926680bc8fc0d",
+              "bytes": 15903
+            },
+            {
+              "kind": "repository",
+              "id": "paths",
+              "path": "ci/check_paths.py",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "3bcedfdd58937bee2abf185215805bd43241a2e2ed42da30d4823ace11833e42",
+              "bytes": 2708
+            },
+            {
+              "kind": "repository",
+              "id": "workflow",
+              "path": ".github/workflows/gate.yml",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "c8cb36fb279c61b9937d55bc0d5818be0a5261f66d40a40867f8f5128dc25ae9",
+              "bytes": 2063
+            },
+            {
+              "kind": "repository",
+              "id": "protect",
+              "path": "ci/protect-main.sh",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "847e80d9743e38e02c7a170874dcd6154bdbfd4df54ac55d2ac8ed81443355a4",
+              "bytes": 1548
+            },
+            {
+              "kind": "repository",
+              "id": "known",
+              "path": "oracle/README.md",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "f2a8be5834883c4a83dd88d559d224dcdfc721a9a12a9a3fccda5aabe8643875",
+              "bytes": 6144
+            },
+            {
+              "kind": "repository",
+              "id": "finding1",
+              "path": "bughunt/README.md",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+              "bytes": 29269
+            },
+            {
+              "kind": "repository",
+              "id": "reset",
+              "path": "json-c/json_tokener.c",
+              "revision": "45000108a05e854494b89708454d0be49ac40592",
+              "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+              "bytes": 42258
+            },
+            {
+              "kind": "diagram-spec",
+              "id": "merge-flow",
+              "inline": true,
+              "sha256": "75803f8497199e2f85ffded21b31aab25d011157b83e6782f78122c154e62fe8",
+              "bytes": 1517
+            },
+            {
+              "kind": "diagram-spec",
+              "id": "check-run",
+              "inline": true,
+              "sha256": "68a97a81786f729c1caf3da8300b67454f080b8ff21164d27225396e278b0a65",
+              "bytes": 1212
+            },
+            {
+              "kind": "diagram-spec",
+              "id": "leak-trace",
+              "inline": true,
+              "sha256": "f7563ec830e70dcf19f42a7b2c3459f0d35773edbc7db6a0327b5b0c7967372a",
+              "bytes": 731
+            }
+          ]
+        },
+        "specification": {
+          "sha256": "dd56288faa8626e6ee51853d97378996cf73bba953bc2f8d2a243a9fabdb6945",
+          "bytes": 10872
+        },
+        "artifact": {
+          "sha256": "839e6b397e684cb3bf9f73db5802463edfbb249e0017352f70acbaa7b2f54df9",
+          "bytes": 1640291
+        },
+        "validation": {
+          "checksPassed": 4,
+          "checkCount": 4,
+          "compositionProfile": "showcase",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 0
+        },
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      }
+    },
+    "check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 417,
+      "command": [
+        "/home/lmz/.nvm/versions/node/v24.21.0/bin/node",
+        "/home/lmz/.claude/skills/archify/bin/archify.mjs",
+        "check",
+        "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+        "--require-provenance"
+      ],
+      "receipt": {
+        "ok": true,
+        "file": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+        "family": "explainer",
+        "artifact": {
+          "sha256": "839e6b397e684cb3bf9f73db5802463edfbb249e0017352f70acbaa7b2f54df9",
+          "bytes": 1640291
+        },
+        "checks": [
+          {
+            "name": "explainer_structure",
+            "ok": true,
+            "details": [
+              "110 unique DOM IDs"
+            ]
+          },
+          {
+            "name": "explainer_payload_identity",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "explainer_dependencies",
+            "ok": true,
+            "details": [
+              "11 frozen dependencies"
+            ]
+          },
+          {
+            "name": "explainer_native_diagrams",
+            "ok": true,
+            "details": [
+              "merge-flow: pass",
+              "check-run: pass",
+              "leak-trace: pass"
+            ]
+          }
+        ],
+        "composition": {
+          "schemaVersion": 1,
+          "profile": "showcase",
+          "status": "pass",
+          "summary": {
+            "errors": 0,
+            "warnings": 0
+          },
+          "issues": [],
+          "nativeDiagrams": [
+            {
+              "id": "merge-flow",
+              "receipt": {
+                "ok": true,
+                "file": "/tmp/archify-explainer-check-ScXu9l/child.html",
+                "artifact": {
+                  "sha256": "6360698607d4adf53cd1393a1c5b93844258ffdbe97a2f279b6751e813c7ed07",
+                  "bytes": 926342
+                },
+                "checks": [
+                  {
+                    "name": "single_svg",
+                    "ok": true,
+                    "details": [
+                      "found 1 <svg> block(s)"
+                    ]
+                  },
+                  {
+                    "name": "finite_svg",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "orthogonal_arrows",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "label_route_clearance",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "relationship_crossings",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "relationship_corridors",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "container_border_runs",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "route_rhythm",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "legend_clearance",
+                    "ok": true,
+                    "details": []
+                  }
+                ],
+                "composition": {
+                  "schemaVersion": 1,
+                  "profile": "showcase",
+                  "status": "pass",
+                  "summary": {
+                    "errors": 0,
+                    "warnings": 0
+                  },
+                  "metrics": {
+                    "properCrossings": 0,
+                    "resolvedCrossovers": 0,
+                    "ambiguousCorridors": 0,
+                    "arrowheadCollisions": 0,
+                    "containerBorderRuns": 0,
+                    "labelRouteClearanceIssues": 0,
+                    "labelCanvasOverflowIssues": 0,
+                    "minLabelRouteClearance": 22,
+                    "desktopReadabilityIssues": 0,
+                    "viewportHeightIssues": 0,
+                    "minProjectedNodeTextPx": 6.625111308993767,
+                    "maxBends": 0,
+                    "routesOverSuggestedBends": 0,
+                    "maxStretch": 1,
+                    "routesOverSuggestedStretch": 0,
+                    "minSegmentPx": 8,
+                    "minInteriorSegmentPx": null,
+                    "shortSegmentCount": 4,
+                    "shortEndpointSegmentCount": 4,
+                    "shortInteriorSegmentCount": 0,
+                    "microSegmentCount": 0
+                  },
+                  "suggestedLimits": {
+                    "bendsPerRelationship": 2,
+                    "stretch": 1.35,
+                    "segmentPx": 16,
+                    "microSegmentPx": 8
+                  },
+                  "routeReview": {
+                    "crossings": [],
+                    "detours": []
+                  },
+                  "leadingSpace": {
+                    "measured": false,
+                    "reviewSuggested": false
+                  },
+                  "desktopReadability": {
+                    "budgetBasis": "legacy-930",
+                    "readerContract": "declared-wide-v1",
+                    "availableDiagramWidth": 930,
+                    "actualBudgetPx": 930,
+                    "limit": "legacy",
+                    "requestedTargetPx": null,
+                    "requestedTargetMet": null,
+                    "hardFloorPx": 6,
+                    "hardFloorMet": true,
+                    "minimumOwner": {
+                      "kind": "edge",
+                      "id": "gate-to-blocked-1",
+                      "from": "gate",
+                      "to": "blocked"
+                    },
+                    "minimumSourceTextPx": 8,
+                    "minimumProjectedTextPx": 6.625111308993767,
+                    "semanticTextCount": 13
+                  },
+                  "issues": []
+                }
+              }
+            },
+            {
+              "id": "check-run",
+              "receipt": {
+                "ok": true,
+                "file": "/tmp/archify-explainer-check-RUgFmW/child.html",
+                "artifact": {
+                  "sha256": "729846076b684f5f1829e21a5fee84d73c5f96cb2b971a9d355b79e622f3351c",
+                  "bytes": 922999
+                },
+                "checks": [
+                  {
+                    "name": "single_svg",
+                    "ok": true,
+                    "details": [
+                      "found 1 <svg> block(s)"
+                    ]
+                  },
+                  {
+                    "name": "finite_svg",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "orthogonal_arrows",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "label_route_clearance",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "relationship_crossings",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "relationship_corridors",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "container_border_runs",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "route_rhythm",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "legend_clearance",
+                    "ok": true,
+                    "details": []
+                  }
+                ],
+                "composition": {
+                  "schemaVersion": 1,
+                  "profile": "showcase",
+                  "status": "pass",
+                  "summary": {
+                    "errors": 0,
+                    "warnings": 0
+                  },
+                  "metrics": {
+                    "properCrossings": 0,
+                    "resolvedCrossovers": 0,
+                    "ambiguousCorridors": 0,
+                    "arrowheadCollisions": 0,
+                    "containerBorderRuns": 0,
+                    "labelRouteClearanceIssues": 0,
+                    "labelCanvasOverflowIssues": 0,
+                    "minLabelRouteClearance": 22,
+                    "desktopReadabilityIssues": 0,
+                    "viewportHeightIssues": 0,
+                    "minProjectedNodeTextPx": 7.873015873015873,
+                    "maxBends": 0,
+                    "routesOverSuggestedBends": 0,
+                    "maxStretch": 1,
+                    "routesOverSuggestedStretch": 0,
+                    "minSegmentPx": 8,
+                    "minInteriorSegmentPx": null,
+                    "shortSegmentCount": 3,
+                    "shortEndpointSegmentCount": 3,
+                    "shortInteriorSegmentCount": 0,
+                    "microSegmentCount": 0
+                  },
+                  "suggestedLimits": {
+                    "bendsPerRelationship": 2,
+                    "stretch": 1.35,
+                    "segmentPx": 16,
+                    "microSegmentPx": 8
+                  },
+                  "routeReview": {
+                    "crossings": [],
+                    "detours": []
+                  },
+                  "leadingSpace": {
+                    "measured": false,
+                    "reviewSuggested": false
+                  },
+                  "desktopReadability": {
+                    "budgetBasis": "legacy-930",
+                    "readerContract": "declared-wide-v1",
+                    "availableDiagramWidth": 930,
+                    "actualBudgetPx": 930,
+                    "limit": "legacy",
+                    "requestedTargetPx": null,
+                    "requestedTargetMet": null,
+                    "hardFloorPx": 6,
+                    "hardFloorMet": true,
+                    "minimumOwner": {
+                      "kind": "edge",
+                      "id": "runold-to-runnew-1",
+                      "from": "runold",
+                      "to": "runnew"
+                    },
+                    "minimumSourceTextPx": 8,
+                    "minimumProjectedTextPx": 7.873015873015873,
+                    "semanticTextCount": 7
+                  },
+                  "issues": []
+                }
+              }
+            },
+            {
+              "id": "leak-trace",
+              "receipt": {
+                "ok": true,
+                "file": "/tmp/archify-explainer-check-dkigQn/child.html",
+                "artifact": {
+                  "sha256": "d11ad7af3dfcd2f15d712d6a15572349274cfc8ab791311b5ae5975e0fd09473",
+                  "bytes": 914301
+                },
+                "checks": [
+                  {
+                    "name": "single_svg",
+                    "ok": true,
+                    "details": [
+                      "found 1 <svg> block(s)"
+                    ]
+                  },
+                  {
+                    "name": "finite_svg",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "orthogonal_arrows",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "label_route_clearance",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "relationship_crossings",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "relationship_corridors",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "container_border_runs",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "route_rhythm",
+                    "ok": true,
+                    "details": []
+                  },
+                  {
+                    "name": "legend_clearance",
+                    "ok": true,
+                    "details": []
+                  }
+                ],
+                "composition": {
+                  "schemaVersion": 1,
+                  "profile": "showcase",
+                  "status": "pass",
+                  "summary": {
+                    "errors": 0,
+                    "warnings": 0
+                  },
+                  "metrics": {
+                    "properCrossings": 0,
+                    "resolvedCrossovers": 0,
+                    "ambiguousCorridors": 0,
+                    "arrowheadCollisions": 0,
+                    "containerBorderRuns": 0,
+                    "labelRouteClearanceIssues": 0,
+                    "labelCanvasOverflowIssues": 0,
+                    "minLabelRouteClearance": 28,
+                    "desktopReadabilityIssues": 0,
+                    "viewportHeightIssues": 0,
+                    "minProjectedNodeTextPx": 11,
+                    "maxBends": 0,
+                    "routesOverSuggestedBends": 0,
+                    "maxStretch": 1,
+                    "routesOverSuggestedStretch": 0,
+                    "minSegmentPx": 254,
+                    "minInteriorSegmentPx": null,
+                    "shortSegmentCount": 0,
+                    "shortEndpointSegmentCount": 0,
+                    "shortInteriorSegmentCount": 0,
+                    "microSegmentCount": 0
+                  },
+                  "suggestedLimits": {
+                    "bendsPerRelationship": 2,
+                    "stretch": 1.35,
+                    "segmentPx": 16,
+                    "microSegmentPx": 8
+                  },
+                  "routeReview": {
+                    "crossings": [],
+                    "detours": []
+                  },
+                  "leadingSpace": {
+                    "measured": false,
+                    "reviewSuggested": false
+                  },
+                  "sequenceColumnSpace": {
+                    "measured": true,
+                    "columnFit": "spread",
+                    "participantCount": 2,
+                    "occupiedRight": 520,
+                    "viewBoxLeft": 0,
+                    "canvasWidth": 560,
+                    "emptyRightPx": 40,
+                    "emptyRightRatio": 0.071,
+                    "typicalParticipantWidth": 190,
+                    "reviewSuggested": false
+                  },
+                  "desktopReadability": {
+                    "budgetBasis": "legacy-930",
+                    "readerContract": "declared-wide-v1",
+                    "availableDiagramWidth": 930,
+                    "actualBudgetPx": 930,
+                    "limit": "legacy",
+                    "requestedTargetPx": null,
+                    "requestedTargetMet": null,
+                    "hardFloorPx": 6,
+                    "hardFloorMet": true,
+                    "minimumOwner": {
+                      "kind": "edge",
+                      "id": "app-to-tok-1",
+                      "from": "app",
+                      "to": "tok"
+                    },
+                    "minimumSourceTextPx": 11,
+                    "minimumProjectedTextPx": 11,
+                    "semanticTextCount": 6
+                  },
+                  "issues": []
+                }
+              }
+            }
+          ]
+        },
+        "diagnostics": [],
+        "provenance": "current",
+        "deliveryReceiptId": "360fe45b-6364-42b3-af94-3257ad390ac3"
+      }
+    }
+  },
+  "browserCheck": {
+    "requested": false,
+    "ran": false
+  },
+  "diagnostics": [],
+  "evidence": {
+    "receipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.finalize.json",
+    "summaryReceipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "finishedAt": "2026-11-24T06:55:25.086Z",
+  "durationMs": 1426,
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-valid"
+  }
+}

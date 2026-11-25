@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "378c6af5-44df-4182-a5be-8a74e80b7029",
+  "status": "current",
+  "command": "deliver",
+  "type": "explainer",
+  "input": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-tokener-states-20261124-162529/candidate.archify.md",
+  "output": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-tokener-states-20261124-162529/tokener-states.html",
+  "specification": {
+    "sha256": "283e018297898a58966ba8ad34054bc45ca54445b0bcb5903645e066fdbcffad",
+    "bytes": 14764
+  },
+  "artifact": {
+    "sha256": "8ce04910953c9ab13636fb9346133bc7e9e242a662e751a55a465f5d70f22ae5",
+    "bytes": 1869229
+  },
+  "explainer": {
+    "preparedSha256": "13066164ebbf4e837d72f8255963f64e44713ea93413942ccf0853833ec616e2",
+    "dependencies": [
+      {
+        "kind": "repository",
+        "id": "structs",
+        "path": "json-c/json_tokener.h",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "7d9e119b8f5f90141561e41f1da1b635485f440dc67d2240b902d9c11be42ca6",
+        "bytes": 10646
+      },
+      {
+        "kind": "repository",
+        "id": "states",
+        "path": "json-c/json_tokener.h",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "7d9e119b8f5f90141561e41f1da1b635485f440dc67d2240b902d9c11be42ca6",
+        "bytes": 10646
+      },
+      {
+        "kind": "repository",
+        "id": "newex",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "resetlevel",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "macros",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "loop",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "finish",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "literals",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "comments",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "strings",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "boolean",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "number",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "arrays",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "repository",
+        "id": "objects",
+        "path": "json-c/json_tokener.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "2a060028a310f244e00cf028d4739bb9ea33b972721298d32c768003392c1bb4",
+        "bytes": 42258
+      },
+      {
+        "kind": "diagram-spec",
+        "id": "tokener-structs",
+        "inline": true,
+        "sha256": "cf623b8f640ed052870b63d1c8b8ac66e930f8c850dde4e1ff70ae919b86199a",
+        "bytes": 1174
+      },
+      {
+        "kind": "diagram-spec",
+        "id": "object-levels",
+        "inline": true,
+        "sha256": "f76a2055d5ce586e28deef0471a9f2a3f2b3c185fd4f2c58c775006e2c3acd81",
+        "bytes": 1052
+      }
+    ]
+  }
+}

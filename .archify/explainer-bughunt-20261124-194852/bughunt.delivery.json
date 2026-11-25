@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "55fbfb18-a37c-468b-a2c5-cc005f2023bf",
+  "status": "current",
+  "command": "deliver",
+  "type": "explainer",
+  "input": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-bughunt-20261124-194852/candidate.archify.md",
+  "output": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-bughunt-20261124-194852/bughunt.html",
+  "specification": {
+    "sha256": "fd4a1d16ff41caf30866fc3984649128192980d4ffc834ec8fd7b542bd3d1de6",
+    "bytes": 13018
+  },
+  "artifact": {
+    "sha256": "a23eaaf04cd64cea544b768fdf69cbd6f8a48ebd0df08bb4ee6dac8d376ebeeb",
+    "bytes": 1004744
+  },
+  "explainer": {
+    "preparedSha256": "c131c301072adf8629f326d2a7b59a7b747dcde9d4954ed7f4bedbd5547dbce5",
+    "dependencies": [
+      {
+        "kind": "repository",
+        "id": "findings",
+        "path": "bughunt/README.md",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+        "bytes": 29269
+      },
+      {
+        "kind": "repository",
+        "id": "observations",
+        "path": "bughunt/README.md",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+        "bytes": 29269
+      },
+      {
+        "kind": "repository",
+        "id": "rediscovered",
+        "path": "bughunt/README.md",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+        "bytes": 29269
+      },
+      {
+        "kind": "repository",
+        "id": "clean",
+        "path": "bughunt/README.md",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+        "bytes": 29269
+      },
+      {
+        "kind": "repository",
+        "id": "mutation",
+        "path": "bughunt/README.md",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+        "bytes": 29269
+      },
+      {
+        "kind": "repository",
+        "id": "round8",
+        "path": "bughunt/README.md",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1e02b1d673901cbd5a44e9573e174fca3e2f2f1f0b009bcd6044af92d317b13e",
+        "bytes": 29269
+      },
+      {
+        "kind": "repository",
+        "id": "mut7b",
+        "path": "bughunt/mutation/mut7b.txt",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "fd7cdf973b84525d12776f6868c6e2f926ea477e6a31e1f74e1320fc1e73e9b7",
+        "bytes": 1779
+      },
+      {
+        "kind": "repository",
+        "id": "mut1b",
+        "path": "bughunt/mutation/mut1b.txt",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "1bf9b08d7ec83cfa3e5104eb203e0392aadd74fb1cced7ba046bc1ec007a4af5",
+        "bytes": 1550
+      },
+      {
+        "kind": "repository",
+        "id": "r1",
+        "path": "bughunt/repro_comment_eof.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "3047e7c473bc82d51bd261136cce29b5e961028a4a2e5c96d2ff99e0f9ded06c",
+        "bytes": 868
+      },
+      {
+        "kind": "repository",
+        "id": "r2",
+        "path": "bughunt/repro_comment_stars.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "7959024770af976f0cf57412884da6e6cbbb33929bc49b5cba248555c51d5586",
+        "bytes": 860
+      },
+      {
+        "kind": "repository",
+        "id": "r3",
+        "path": "bughunt/repro_utf8_lookahead.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "0d6120dca7f6bba3c9d8d1694fef98fec06466b720340808bb8ab492e4265510",
+        "bytes": 1357
+      },
+      {
+        "kind": "repository",
+        "id": "r3b",
+        "path": "bughunt/repro_utf8_relabel.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "92824a208a077bebbd9e35f4e658a70972394e32d617acfca8b1f445ef6dc095",
+        "bytes": 1185
+      },
+      {
+        "kind": "repository",
+        "id": "r4",
+        "path": "bughunt/repro_strict_single_quote_key.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "c11f8ac65327af6a3912e6694dd67caec9eb40f7a619111453ca05f54f0fecbc",
+        "bytes": 703
+      },
+      {
+        "kind": "repository",
+        "id": "r5",
+        "path": "bughunt/repro_oom_eof.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "310fcac26dc25ec47c956ef0dea430d33e91d7794ff1ef43635deabd0f74be84",
+        "bytes": 1532
+      },
+      {
+        "kind": "repository",
+        "id": "r6",
+        "path": "bughunt/repro_quadratic_number.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "7f3cc83cf33901c85708a0fecf73115e31a0052cbadee7b4acb96b75c0d00aba",
+        "bytes": 1446
+      },
+      {
+        "kind": "repository",
+        "id": "r7",
+        "path": "bughunt/repro_comment_memory.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "170ca227509d42c536e8ba564c603b93f39630d3b0de39d9ecb928db47bcfc45",
+        "bytes": 1253
+      },
+      {
+        "kind": "repository",
+        "id": "r8",
+        "path": "bughunt/repro_tsan_locale_race.c",
+        "revision": "45000108a05e854494b89708454d0be49ac40592",
+        "sha256": "08a56da8e9dfe81bc075f5e801b14ff18f55262a9ff53c7b15ded66410469c2b",
+        "bytes": 927
+      },
+      {
+        "kind": "diagram-spec",
+        "id": "hunt-flow",
+        "inline": true,
+        "sha256": "77f1074c8ae4caf7c8f698d5af2f1ae86b56620c9c2017a6a5eea92d7308d6e9",
+        "bytes": 1697
+      }
+    ]
+  }
+}

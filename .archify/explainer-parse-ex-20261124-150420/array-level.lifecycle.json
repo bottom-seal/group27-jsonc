@@ -1,0 +1,107 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "An array level",
+    "subtitle": "eatws runs between any two states",
+    "output": "array-level.html",
+    "quality_profile": "showcase",
+    "locale": "en"
+  },
+  "mainPath": [
+    "start",
+    "array",
+    "array_add",
+    "array_sep",
+    "finish"
+  ],
+  "states": [
+    {
+      "id": "start",
+      "type": "start",
+      "label": "start",
+      "sublabel": "first byte",
+      "explanation": "json_tokener_state_start looks at the first byte of a value: '{' opens an object, '[' an array, and anything else starts a string, number or literal on this same level."
+    },
+    {
+      "id": "array",
+      "type": "waiting",
+      "label": "array / array_after_sep",
+      "sublabel": "] or push",
+      "explanation": "One case handles both: ']' closes the array (rejected after a comma in STRICT mode); any other byte checks the depth limit and pushes a child level for the next element."
+    },
+    {
+      "id": "array_add",
+      "type": "active",
+      "label": "array_add",
+      "sublabel": "append",
+      "explanation": "Appends the value the child level handed back in obj to the array in current."
+    },
+    {
+      "id": "array_sep",
+      "type": "decision",
+      "label": "array_sep",
+      "sublabel": ", or ]",
+      "explanation": "',' goes back to array_after_sep for the next element; ']' finishes the array."
+    },
+    {
+      "id": "finish",
+      "type": "success",
+      "label": "finish",
+      "sublabel": "pop to parent",
+      "explanation": "At depth 0 the call jumps to out:. Deeper, it takes a reference to current into the local obj, resets this level, decrements depth and re-checks the same byte in the parent's state (array_add or object_value_add)."
+    },
+    {
+      "id": "error",
+      "type": "failure",
+      "label": "goto out",
+      "sublabel": "error",
+      "explanation": "Every state sets tok->err and jumps to out: on a byte it cannot accept."
+    }
+  ],
+  "transitions": [
+    {
+      "id": "a1",
+      "from": "start",
+      "to": "array",
+      "label": "["
+    },
+    {
+      "id": "a2",
+      "from": "array",
+      "to": "array_add",
+      "label": "child done",
+      "variant": "emphasis"
+    },
+    {
+      "id": "a3",
+      "from": "array_add",
+      "to": "array_sep"
+    },
+    {
+      "id": "a4",
+      "from": "array_sep",
+      "to": "finish",
+      "label": "]"
+    },
+    {
+      "id": "a5",
+      "from": "array_sep",
+      "to": "array",
+      "label": ","
+    },
+    {
+      "id": "a6",
+      "from": "array",
+      "to": "finish",
+      "label": "] empty"
+    },
+    {
+      "id": "a7",
+      "from": "array_sep",
+      "to": "error",
+      "label": "other",
+      "variant": "dashed"
+    }
+  ]
+}
