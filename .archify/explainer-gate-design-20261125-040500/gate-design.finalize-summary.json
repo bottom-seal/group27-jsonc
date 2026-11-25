@@ -7,13 +7,13 @@
   "quality": "showcase",
   "specification": {
     "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-gate-design-20261125-040500/candidate.archify.md",
-    "sha256": "42156be11ea86baf6a67e6f1bdc4d296a62984655898f5ac62d5279c4e2051d5",
-    "bytes": 11378
+    "sha256": "29fc61da7263e6f63cdf71342fcbbf1922445aaa9d56d1a82a4154cc5614a8b1",
+    "bytes": 11775
   },
   "artifact": {
     "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-gate-design-20261125-040500/gate-design.html",
-    "sha256": "4a392a47ad5e962298852af3075763bdac61329b8d68ac15d610877b998c42b2",
-    "bytes": 828623
+    "sha256": "35b6da02848c4a38c3e336ed851f64ba533e603c77fe77d81953679d930ba46e",
+    "bytes": 832235
   },
   "gates": {
     "validate": "pass",
@@ -32,7 +32,7 @@
     "summaryReceipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-gate-design-20261125-040500/gate-design.finalize-summary.json"
   },
   "visualReview": "not-requested",
-  "durationMs": 877,
+  "durationMs": 940,
   "browserCheck": {
     "requested": false,
     "ran": false

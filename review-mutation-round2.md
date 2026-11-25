@@ -147,7 +147,7 @@ The other 12 states are pass-through states. When the text runs out there, the r
 
 ## Caveats before moving any of this into the real gate
 
-1. **The memory-failure comparison is very strict.** It requires the refactor to make the same memory requests in the same order. A correct refactor that allocates differently (one buffer fewer, say) would fail. The real gate should use a weaker rule. Under any single failed request, the refactor must not crash and must not leak, and it must give either the original's answer or an out-of-memory error. I haven't measured how many mutants that weaker rule still catches. *(Done since: commit `f6b5f24`, see "After the measurements" below.)*
+1. **The memory-failure comparison is very strict.** It requires the refactor to make the same memory requests in the same order. A correct refactor that allocates differently (one buffer fewer, say) would fail. The real gate should use a weaker rule. Under any single failed request, the refactor must not crash and must not leak, and it must give either the original's answer or an out-of-memory error. I haven't measured how many mutants that weaker rule still catches. *(Done since: commit `b997720`, see "After the measurements" below.)*
 2. **The German locale** is built with `localedef` into a user folder (no sudo) and found through `LOCPATH`. CI would build it the same way. glibc's `newlocale` keeps a small allocation when `LOCPATH` is set, so the recorder tells LeakSanitizer to ignore that one allocation.
 3. **Time per check:**
 
@@ -159,12 +159,12 @@ The other 12 states are pass-through states. When the text runs out there, the r
 
    Most of the cost is the memory-failure mode. That is fine for one PR, but slow for big mutation campaigns.
 4. **Neighbour inputs gave little:** 3 catches for 2,268 inputs.
-5. **Fuzzer finds are single inputs.** The fuzzer itself should keep running as a separate job that never fails a PR, with each new find added to `oracle/inputs/`. *(Done since: the `fuzz` job, commit `ee627ee`; not a required check.)*
+5. **Fuzzer finds are single inputs.** The fuzzer itself should keep running as a separate job that never fails a PR, with each new find added to `oracle/inputs/`. *(Done since: the `fuzz` job, commit `18214b4`; not a required check.)*
 6. **Not analysed:** under memory failure, the original sometimes answers "success" (2,264 times) or an error other than "out of memory". Bug-hunt finding 5 is one such case. The rest weren't checked.
 
 ## Suggested order for the real gate
 
-*(Done since: steps 1–5 are commits on `a/gate-iterations`, each with its tests; see "After the measurements" below. Step 6 went in differently: the large inputs are stored in `oracle/inputs/large.txt`, 1.5 MB, not generated at run time.)*
+*(Done since: steps 1–5 are committed, each with its tests; see "After the measurements" below. Step 6 went in differently: the large inputs are stored in `oracle/inputs/large.txt`, 1.5 MB, not generated at run time.)*
 
 1. **Feeding in pieces, streams, readers taking turns, all 8 flag sets, edge-case API calls** (task 2). This is the biggest single gain.
 2. **Checks after a reset, and two readers with different settings.** Both are cheap.
@@ -177,7 +177,7 @@ Each step should come with tests in `oracle/tests/` that plant the matching mist
 
 ## After the measurements: what went into the gate
 
-All of this is on branch `a/gate-iterations` (local and partly pushed; nothing merged). One commit per iteration, so each can be checked out and measured on its own:
+The iterations are on branch `a/gate-iterations`, one commit each, so each can be checked out and measured on its own (nothing is merged yet):
 
 | Commit | Iteration | Answers per check |
 |---|---|---|
@@ -188,17 +188,17 @@ All of this is on branch `a/gate-iterations` (local and partly pushed; nothing m
 
 The committed iterations are clean rewrites of the scratch versions above, not copies, and were **not measured again**: the catch rates in this file are the scratch versions'. Differences from the scratch versions: multi-call parses also record how many calls they took; each answer is filed under its own input, with an `#input N` line so a crash is placed correctly; the edge-case API calls are filed after the last input and named as such in reports.
 
-Later commits on the branch:
+The rest is on branches of its own, each built on the one before: `a/ci` ← `a/metrics` ← `a/gate-iterations` ← `a/fuzz` ← `a/anti-cheat` ← `a/docs`.
 
-| Commit | Change |
-|---|---|
-| `595a2e5` | `oracle/metrics.py`, report only |
-| `43a90e1` | CI no longer runs the gate's own tests (they test the gate, not a rewrite) |
-| `a06005a`, `ee627ee` | The differential fuzzer in `fuzz/`, and a `fuzz` job for rewrite PRs (not a required check) |
-| `c6c6d9c` | Fix: the locale was not found with a relative `--build-dir` |
-| `f6b5f24` | The fairer failed-allocation rule (caveat 1). A correct rewrite with one extra allocation now passes; the planted out-of-memory mistakes of iterations 2 and 3 are still caught |
-| `600453c` | The anti-cheat check, below |
-| `6bd2314`, `c7b5faa` | README: how to run everything; what Role B may use |
+| Branch | Commit | Change |
+|---|---|---|
+| `a/metrics` | `595a2e5` | `oracle/metrics.py`, report only |
+| `a/gate-iterations` | `43a90e1` | CI no longer runs the gate's own tests (they test the gate, not a rewrite) |
+| `a/gate-iterations` | `f159d33` | Fix: the locale was not found with a relative `--build-dir` |
+| `a/gate-iterations` | `b997720` | The fairer failed-allocation rule (caveat 1). A correct rewrite with one extra allocation now passes; the planted out-of-memory mistakes of iterations 2 and 3 are still caught |
+| `a/fuzz` | `23e3570`, `18214b4` | The differential fuzzer in `fuzz/`, and a `fuzz` job for rewrite PRs (not a required check) |
+| `a/anti-cheat` | `f42ce65`, `5c837f1` | The anti-cheat check, below, and what Role B may use |
+| `a/docs` | `76c4213` and later | README: how to run everything; these notes, the deck and the explainer pages |
 
 Tests: 113 pass, plus 2 that need cmake (not installed on this machine).
 
@@ -231,7 +231,7 @@ Time per group in one run of v3 on the original (about 9 s of checking): pieces,
 
 After the 60-second fuzzing and the 2,268 neighbour inputs, the 94 unproven survivors were fuzzed again for 3 minutes each with libFuzzer's value profiling (`-use_value_profile=1`, which steers inputs towards the constants the code compares against). **None showed a difference.** They are very likely harmless, but not proven.
 
-## The anti-cheat check (`600453c`)
+## The anti-cheat check (`f42ce65`)
 
 Before a rewrite is built, `oracle/cheats.py` compares it with the original and rejects it (exit 5, REJECTED) if it calls functions a parser has no use for (R1), defines names the C library or sanitizers own (R2), uses compiler tricks (R3), tests how it is being built (R4), or contains a new string of 4 or more characters found in the gate's inputs (R5).
 

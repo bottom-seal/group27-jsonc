@@ -7,7 +7,7 @@ A rewrite passes only if it gives the original's answers to about 1 million ques
 - The checker feeds the original and the rewrite 5,698 inputs in more than 30 ways and compares every answer.[](source:recorder)
 - On rewrite PRs, a fuzzer also tries inputs nobody wrote; what it finds becomes a permanent input.[](source:fuzz)
 
-@answer scope="Branch a/gate-iterations at 600453c (local; up to c6c6d9c pushed) · baseline json-c d2ce61e · numbers measured in the gate review, 24–25 Nov 2026"
+@answer scope="Branches a/metrics, a/gate-iterations, a/fuzz and a/anti-cheat (pushed, not merged) · baseline json-c d2ce61e · numbers measured in the gate review, 24–25 Nov 2026"
 @meta locale=en
 @source paths title="Path rules" path=ci/check_paths.py lines=1:20
 @source workflow title="CI workflow" path=.github/workflows/gate.yml lines=1:87
@@ -86,16 +86,17 @@ Every answer records the type of each value, the exact value of each double, the
 | 3, v3 (`f697874`) | Failures creating tokeners and in `parse_verbose`, two settings at once, 5 more fuzzer finds | 656,203 |
 | 4, neighbours (`eb64d4e`) | 2,268 inputs with one character swapped for its neighbour | 1,051,570 |
 
-The other commits on the branch support the iterations:
+The rest is on branches of its own, each built on the one before: `a/ci` ← `a/metrics` ← `a/gate-iterations` ← `a/fuzz` ← `a/anti-cheat` ← `a/docs`.
 
-| Commit | Change |
-| --- | --- |
-| `595a2e5` | `metrics.py`: coverage, timing and lines no input runs, report only |
-| `43a90e1`, `ee627ee` | CI stops running the gate's own tests; a `fuzz` job for rewrite PRs |
-| `a06005a` | The differential fuzzer in `fuzz/` |
-| `c6c6d9c` | Fix: the locale was not found with a relative `--build-dir` |
-| `f6b5f24` | The failed-allocation rule, so a rewrite may allocate in another order |
-| `600453c` | The anti-cheat check |
+| Branch | Commit | Change |
+| --- | --- | --- |
+| `a/metrics` | `595a2e5` | `metrics.py`: coverage, timing and lines no input runs, report only |
+| `a/gate-iterations` | `43a90e1` | CI stops running the gate's own tests |
+| `a/gate-iterations` | `f159d33` | Fix: the locale was not found with a relative `--build-dir` |
+| `a/gate-iterations` | `b997720` | The failed-allocation rule, so a rewrite may allocate in another order |
+| `a/fuzz` | `23e3570`, `18214b4` | The differential fuzzer in `fuzz/`, and a `fuzz` job for rewrite PRs |
+| `a/anti-cheat` | `f42ce65`, `5c837f1` | The anti-cheat check, and what a rewrite may use |
+| `a/docs` | `76c4213` and later | How to run everything, the review notes, the deck and these pages |
 
 The tests went from 77 after iteration 1 to 113 now, plus 2 that need cmake. CI no longer runs them; run them before changing the gate.
 
@@ -153,7 +154,7 @@ Run against the original itself, an earlier version of this harness found no dif
 
 ## What is still open? {#open}
 
-- [ ] Review the 11 commits on `a/gate-iterations`; the last 2 are not pushed yet.
+- [ ] Open a PR for each branch once the whole team has joined; each branch has an issue.
 - [ ] After the first PR run, check the `de_DE` locale step and the `fuzz` job, which have not run on GitHub yet.
 - [ ] Add a second code owner to `.github/CODEOWNERS`, then run `ci/protect-main.sh`.
 - [ ] Tell Role B the anti-cheat rules before the refactors start.

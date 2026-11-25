@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
-  "receiptId": "d505a38b-43d9-4d08-a87b-0e113b21eaf1",
+  "receiptId": "09fdf533-3b3c-41b7-844a-cf5f27d8e013",
   "status": "current",
   "command": "deliver",
   "type": "explainer",
   "input": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-gate-design-20261125-040500/candidate.archify.md",
   "output": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-gate-design-20261125-040500/gate-design.html",
   "specification": {
-    "sha256": "42156be11ea86baf6a67e6f1bdc4d296a62984655898f5ac62d5279c4e2051d5",
-    "bytes": 11378
+    "sha256": "29fc61da7263e6f63cdf71342fcbbf1922445aaa9d56d1a82a4154cc5614a8b1",
+    "bytes": 11775
   },
   "artifact": {
-    "sha256": "4a392a47ad5e962298852af3075763bdac61329b8d68ac15d610877b998c42b2",
-    "bytes": 828623
+    "sha256": "35b6da02848c4a38c3e336ed851f64ba533e603c77fe77d81953679d930ba46e",
+    "bytes": 832235
   },
   "explainer": {
-    "preparedSha256": "a94d508da05b2a241b21e727f1cedb4fbb546473e07f1328aabd90db6daea644",
+    "preparedSha256": "b3d5a70f81ef8c1f95cde6a2efc9610a6525bae276361274aea3fe16e17f2966",
     "dependencies": [
       {
         "kind": "repository",
         "id": "paths",
         "path": "ci/check_paths.py",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "3bcedfdd58937bee2abf185215805bd43241a2e2ed42da30d4823ace11833e42",
         "bytes": 2708
       },
@@ -29,7 +29,7 @@
         "kind": "repository",
         "id": "workflow",
         "path": ".github/workflows/gate.yml",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "c02f3c25506c8bc056e981b8ddedef53e8a0e5a24516486607323fd4be1b1a45",
         "bytes": 2763
       },
@@ -37,7 +37,7 @@
         "kind": "repository",
         "id": "check",
         "path": "oracle/check.py",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "036995ff7c55ed45584d2eec1f24489f1075bcc27d8b6b4d4dc9cbcd220ad3e4",
         "bytes": 19314
       },
@@ -45,7 +45,7 @@
         "kind": "repository",
         "id": "cheats",
         "path": "oracle/cheats.py",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "5b1c5d6fec3bec8d3cbca20c2d53ebe3ecdd4a33413cff258da51c97809451ac",
         "bytes": 9520
       },
@@ -53,7 +53,7 @@
         "kind": "repository",
         "id": "recorder",
         "path": "oracle/recorder.c",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "5db33e8636b81190ae28962c2a251af9f2d9382d9fcbd69f7b2fbca2b681699a",
         "bytes": 22782
       },
@@ -61,7 +61,7 @@
         "kind": "repository",
         "id": "compare",
         "path": "oracle/compare.py",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "f596199c8c09b31de874c6327b52d48f67f03dcb8432b8a03872111255fbf3a9",
         "bytes": 12844
       },
@@ -69,7 +69,7 @@
         "kind": "repository",
         "id": "fuzz",
         "path": "fuzz/fuzz.py",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "0e3bf0c1e01162db0d7f96fdedf41bcfba451bb2219c60df6c7e5b473b09e6ed",
         "bytes": 10759
       },
@@ -77,7 +77,7 @@
         "kind": "repository",
         "id": "readme",
         "path": "oracle/README.md",
-        "revision": "600453cb721b128fc0fa20ee49c49be300592433",
+        "revision": "e17adc8c3695d0681dedba2d6255a751be606f63",
         "sha256": "cbf1176b84ef719aee07cf81843d7c06452d018a91135ec651ec3294337288bd",
         "bytes": 16131
       },
