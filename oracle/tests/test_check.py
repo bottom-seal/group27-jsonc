@@ -186,7 +186,9 @@ def test_candidate_cannot_switch_off_leak_detection_with_default_options(tmp_pat
         "\nconst char *__asan_default_options(void);\n"
         "const char *__asan_default_options(void)\n{\n\treturn \"detect_leaks=0\";\n}\n"
     ))
-    result = run_check(leak)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(leak, "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "LeakSanitizer" in result.stdout
 
@@ -215,7 +217,9 @@ def test_printing_to_stdout_is_a_difference(tmp_path):
     # The baseline tokener prints nothing; a leftover debug print changes
     # what a program using json-c outputs, and must not corrupt the answers.
     noisy = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + '\t\tprintf("debug: got []\\n");\n')
-    result = run_check(noisy)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(noisy, "--skip-cheat-check")
     assert result.returncode == 1, result.stdout + result.stderr
     assert "printed to stdout" in result.stdout
     assert "debug: got []" in result.stdout
@@ -229,14 +233,18 @@ def test_quitting_early_after_faking_the_end_marker_is_a_crash(tmp_path):
         PARSE_EX_START + '\t{ printf("#done 3402\\n"); fflush(stdout); _exit(0); }\n',
     )
     fake.write_text("#include <unistd.h>\n" + fake.read_text())
-    result = run_check(fake)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(fake, "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "stopped before the last input on input #1:" in result.stdout
 
 
 def test_exiting_normally_partway_is_a_crash(tmp_path):
     quits = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + ON_EMPTY_ARRAY + "\t\texit(0);\n")
-    result = run_check(quits)
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(quits, "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "stopped before the last input on input #50: []" in result.stdout
 
@@ -289,6 +297,238 @@ def test_mistakes_in_other_entry_points_are_caught(tmp_path, mistake):
     assert result.returncode == expected, result.stdout + result.stderr
 
 
+def plant(tmp_path: Path, *edits) -> Path:
+    """The baseline tokener with several edits applied in order. An edit is
+    (old, new) for an exact text found once, (old, new, "all") to replace every
+    occurrence, or ("after:" + anchor, old, new) for the first `old` after the
+    unique `anchor`."""
+    src = baseline_source()
+    for edit in edits:
+        if edit[0].startswith("after:"):
+            anchor, old, new = edit[0][len("after:"):], edit[1], edit[2]
+            assert src.count(anchor) == 1, f"anchor must be unique: {anchor!r}"
+            at = src.index(old, src.index(anchor))
+            src = src[:at] + new + src[at + len(old):]
+        elif len(edit) == 3:
+            assert edit[0] in src, edit[0]
+            src = src.replace(edit[0], edit[1])
+        else:
+            assert src.count(edit[0]) == 1, f"replacement anchor must be unique: {edit[0]!r}"
+            src = src.replace(edit[0], edit[1])
+    path = tmp_path / "json_tokener.c"
+    path.write_text(src)
+    return path
+
+
+CALL_START = "\ttok->char_offset = 0;\n\ttok->err = json_tokener_success;\n"
+SAVE_STRING_SO_FAR = ("printbuf_memappend_checked(tok->pb, case_start,\n"
+                      "\t\t\t\t\t                           str - case_start);\n\t\t\t\t\tgoto out;")
+
+# Mistakes that show only when a tokener is used for more than one call or in
+# a way no input file can express: text arriving in pieces, several documents
+# on one reader, two readers taking turns, the two flag sets without STRICT
+# that use ALLOW_TRAILING_CHARS, and unusual API arguments. All of these passed
+# the gate when it only made one call per fresh tokener. Entry: (edits, exit code).
+MULTI_CALL_MISTAKES = {
+    # The success path must reset level 0 for the next document on the same tokener.
+    "level 0 not reset after a success": (
+        [("for (ii = tok->depth; ii >= 0; ii--)", "for (ii = tok->depth; ii > 0; ii--)")], DIFFERENT),
+    "string forgets the text read so far when a call ends inside it": (
+        [("after:case json_tokener_state_string:", SAVE_STRING_SO_FAR, "goto out;")], DIFFERENT),
+    "resumed number accepts a + sign": ([("int pos_sign_ok = 0;", "int pos_sign_ok = 1;")], DIFFERENT),
+    # Values that must survive between calls, cleared at the start of each call.
+    "position inside true/null/\\u cleared at every call": (
+        [(CALL_START, CALL_START + "\ttok->st_pos = 0;\n")], DIFFERENT),
+    "number's is_double cleared at every call": ([(CALL_START, CALL_START + "\ttok->is_double = 0;\n")], DIFFERENT),
+    "text so far dropped at every call": ([(CALL_START, CALL_START + "\tprintbuf_reset(tok->pb);\n")], DIFFERENT),
+    # A per-tokener value moved to a static: one document at a time can't tell.
+    "quote character shared by all tokeners": (
+        [("static unsigned char utf8_replacement_char[3]",
+          "static char g_quote_char;\nstatic unsigned char utf8_replacement_char[3]"),
+         ("tok->quote_char", "g_quote_char", "all")], DIFFERENT),
+    "st_pos shared by all tokeners": (
+        [("static unsigned char utf8_replacement_char[3]",
+          "static int g_st_pos;\nstatic unsigned char utf8_replacement_char[3]"),
+         ("tok->st_pos", "g_st_pos", "all")], DIFFERENT),
+    # Same answers on the 6 flag sets with STRICT or none; differs only for
+    # ALLOW_TRAILING_CHARS without STRICT.
+    "trailing-characters check written as an xor": (
+        [("(tok->flags & (JSON_TOKENER_STRICT | JSON_TOKENER_ALLOW_TRAILING_CHARS)) ==\n\t        JSON_TOKENER_STRICT",
+          "(!(tok->flags & JSON_TOKENER_STRICT) != !(tok->flags & JSON_TOKENER_ALLOW_TRAILING_CHARS))")], DIFFERENT),
+    "len < -1 gives the wrong error": (
+        [("tok->err = json_tokener_error_size;", "tok->err = json_tokener_error_parse_eof;")], DIFFERENT),
+    # A tokener with no room for even one level: ASan stops it.
+    "json_tokener_new_ex(0) returns a tokener": (
+        [("\tif (depth < 1)\n\t\treturn NULL;", "\tif (depth < 0)\n\t\treturn NULL;")], CRASH),
+}
+
+
+@pytest.mark.parametrize("mistake", sorted(MULTI_CALL_MISTAKES))
+def test_mistakes_seen_only_across_calls_or_through_the_api_are_caught(tmp_path, mistake):
+    edits, expected = MULTI_CALL_MISTAKES[mistake]
+    result = run_check(plant(tmp_path, *edits))
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
+LARGE_INPUTS = REPO / "oracle" / "inputs" / "large.txt"
+FUZZ_INPUTS = REPO / "oracle" / "inputs" / "fuzz.txt"
+
+# Mistakes that show only when an allocation fails, under a locale with a
+# decimal comma, right after a reset, or on inputs the fuzzer found. Entry:
+# (edits, exit code, input file or None for core.txt).
+ITERATION2_MISTAKES = {
+    "running out of memory for an object reported as a syntax error": (
+        [("current = json_object_new_object();\n\t\t\t\tif (current == NULL)\n\t\t\t\t{\n"
+          "\t\t\t\t\ttok->err = json_tokener_error_memory;",
+          "current = json_object_new_object();\n\t\t\t\tif (current == NULL)\n\t\t\t\t{\n"
+          "\t\t\t\t\ttok->err = json_tokener_error_parse_unexpected;")], DIFFERENT, None),
+    "numbers read in the caller's locale": ([("\t\tuselocale(c_numeric_locale);\n", "")], DIFFERENT, None),
+    "the caller's locale not put back": ([("\tuselocale(oldlocale);\n", "\t(void)oldlocale;\n")], DIFFERENT, None),
+    "a reset leaves the error set": (
+        [("\ttok->depth = 0;\n\ttok->err = json_tokener_success;\n\ttok->high_surrogate = 0;\n}",
+          "\ttok->depth = 0;\n\ttok->high_surrogate = 0;\n}")], DIFFERENT, None),
+    # Found by the differential fuzzer: no core input has a 9 right after the
+    # point of a STRICT fraction.
+    "strict fraction rejects a 9 after the point": (
+        [("if (*num == '.')\n\t\t\t\t{\n\t\t\t\t\tnum++;\n\t\t\t\t\tif (!(*num >= '0' && *num <= '9'))",
+          "if (*num == '.')\n\t\t\t\t{\n\t\t\t\t\tnum++;\n\t\t\t\t\tif (!(*num >= '0' && *num < '9'))")],
+        DIFFERENT, FUZZ_INPUTS),
+}
+
+
+# Mistakes that show only when creating a tokener runs out of memory, inside
+# json_tokener_parse_verbose, with two tokeners of different settings, or on
+# inputs the fuzzer found later.
+ITERATION3_MISTAKES = {
+    "no NULL check after allocating the tokener": (
+        [("\ttok = (struct json_tokener *)calloc(1, sizeof(struct json_tokener));\n\tif (!tok)\n\t\treturn NULL;\n",
+          "\ttok = (struct json_tokener *)calloc(1, sizeof(struct json_tokener));\n")], CRASH, None),
+    "the tokener leaks when its stack cannot be allocated": (
+        [("\tif (!tok->stack)\n\t{\n\t\tfree(tok);\n\t\treturn NULL;\n\t}",
+          "\tif (!tok->stack)\n\t{\n\t\treturn NULL;\n\t}")], CRASH, None),
+    "parse_verbose loses its out-of-memory error": (
+        [("\t\t*error = json_tokener_error_memory;\n\t\treturn NULL;", "\t\treturn NULL;")], DIFFERENT, None),
+    # The depth-5 tokener takes the depth-64 limit and overruns its own stack.
+    "max_depth shared by all tokeners": (
+        [("static unsigned char utf8_replacement_char[3]",
+          "static int g_max_depth;\nstatic unsigned char utf8_replacement_char[3]"),
+         ("tok->max_depth", "g_max_depth", "all")], CRASH, None),
+    # Found by the fuzzer: "~" right after a value inside an object.
+    "object end accepted for any character from '}' up": (
+        [("after:case json_tokener_state_object_sep:", "if (c == '}')", "if (c >= '}')")], DIFFERENT, FUZZ_INPUTS),
+}
+
+
+@pytest.mark.parametrize("mistake", sorted(ITERATION3_MISTAKES))
+def test_mistakes_seen_creating_tokeners_or_with_two_settings_are_caught(tmp_path, mistake):
+    edits, expected, inputs = ITERATION3_MISTAKES[mistake]
+    extra = ("--inputs", str(inputs)) if inputs else ()
+    result = run_check(plant(tmp_path, *edits), *extra)
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("mistake", sorted(ITERATION2_MISTAKES))
+def test_mistakes_seen_under_memory_failure_locale_reset_or_fuzzer_inputs_are_caught(tmp_path, mistake):
+    edits, expected, inputs = ITERATION2_MISTAKES[mistake]
+    extra = ("--inputs", str(inputs)) if inputs else ()
+    result = run_check(plant(tmp_path, *edits), *extra)
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_a_correct_rewrite_that_allocates_once_more_passes(tmp_path):
+    # A rewrite may allocate in a different order. Here one extra, properly
+    # handled allocation at the start of every call shifts which allocation
+    # fails for each k; a k-by-k comparison would reject this correct rewrite.
+    extra = plant(tmp_path, (CALL_START, CALL_START
+                             + "\t{\n\t\tchar *scratch = malloc(1);\n\t\tif (!scratch)\n\t\t{\n"
+                             "\t\t\ttok->err = json_tokener_error_memory;\n\t\t\treturn NULL;\n\t\t}\n"
+                             "\t\tfree(scratch);\n\t}\n"))
+    result = run_check(extra)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_work_that_grows_with_the_square_of_a_string_times_out_on_large_inputs(tmp_path):
+    # Rescans the string read so far at every character: answers are the same,
+    # and on core.txt (at most 1,000 bytes) it is not even noticeably slower.
+    slow = plant(tmp_path, ("after:case json_tokener_state_string:", "\t\t\t\tif (c == tok->quote_char)\n",
+                            "\t\t\t\t{ volatile const char *p = case_start; while (p < str) p++; }\n"
+                            "\t\t\t\tif (c == tok->quote_char)\n"))
+    result = run_check(slow, "--inputs", str(LARGE_INPUTS), "--timeout", "5", "--slowdown", "5")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "timed out" in result.stdout
+
+
+NEIGHBOUR_INPUTS = REPO / "oracle" / "inputs" / "neighbours.txt"
+
+
+def test_a_resumed_number_accepting_a_sign_is_caught_by_the_neighbour_inputs(tmp_path):
+    # When a number continues from an earlier call and its saved text has an
+    # exponent not at the end, no sign may follow. Only a neighbour input,
+    # fed byte by byte, puts a sign there.
+    resumed = plant(tmp_path, ("\t\t\t\t\t\tneg_sign_ok = 0;\n\t\t\t\t\t\tpos_sign_ok = 0;\n",
+                               "\t\t\t\t\t\tneg_sign_ok = 0;\n"))
+    result = run_check(resumed, "--inputs", str(NEIGHBOUR_INPUTS))
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_a_mistake_in_the_api_calls_is_reported_as_such(tmp_path):
+    result = run_check(plant(tmp_path, *MULTI_CALL_MISTAKES["len < -1 gives the wrong error"][0]))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "the edge-case API calls (after the last input)" in result.stdout
+
+
+REJECTED = 5
+# Candidates that could pass the gate without behaving like the baseline.
+# cheats.py rejects them before they are built. Entry: (text added at the
+# start of each call, or None; text appended to the file, or ""; what the
+# report must say).
+CHEATS = {
+    "reads the sanitizer settings from the environment": (
+        '\tif (getenv("ASAN_OPTIONS")) tok->err = json_tokener_success;\n', "", "getenv"),
+    "writes a file": ('\t{ FILE *f = fopen("/tmp/gate", "w"); if (f) fclose(f); }\n', "", "fopen"),
+    "writes a file through json-c": (
+        '\tjson_object_to_file("/tmp/gate", NULL);\n', "", "json_object_to_file"),
+    "allocates around the allocation-failure wrappers": (
+        "\t{ extern void *__real_malloc(size_t); free(__real_malloc(1)); }\n", "", "__real_malloc"),
+    "prints to stdout": ('\tputs("debug");\n', "", "puts"),
+    "exits": (None, "\nvoid json_tokener_quit(void);\nvoid json_tokener_quit(void) { exit(0); }\n", "exit"),
+    "sleeps": (None, "\nvoid json_tokener_nap(void);\nvoid json_tokener_nap(void) { usleep(1); }\n", "usleep"),
+    "switches leak detection off": (
+        None, "\nint __lsan_is_turned_off(void);\nint __lsan_is_turned_off(void) { return 1; }\n",
+        "__lsan_is_turned_off"),
+    "sets the sanitizer's default options": (
+        None, '\nconst char *__asan_default_options(void);\n'
+              'const char *__asan_default_options(void) { return "detect_leaks=0"; }\n',
+        "__asan_default_options"),
+    "turns off a sanitizer for a function": (
+        None, '\n__attribute__((no_sanitize("address"))) int json_tokener_raw(const char *s);\n'
+              "int json_tokener_raw(const char *s) { return s[0]; }\n", "no_sanitize"),
+    "runs code before main": (None, "\nstatic void json_tokener_setup(void) __attribute__((constructor));\n"
+                                    "static void json_tokener_setup(void) {}\n", "constructor"),
+    "checks for the sanitizer build": (
+        None, "\n#ifdef __SANITIZE_ADDRESS__\nint json_tokener_under_asan = 1;\n#endif\n", "__SANITIZE_ADDRESS__"),
+    "checks for the fuzzer build": (
+        None, "\n#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION\nint json_tokener_fuzzed = 1;\n#endif\n",
+        "FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION"),
+    "carries an answer for one of the gate's inputs": (
+        '\tif (len > 5 && memcmp(str, "[[1/*", 5) == 0)\n\t\ttok->err = json_tokener_success;\n', "", "'[[1/*'"),
+    "uses inline assembly": ('\t__asm__ volatile("" ::: "memory");\n', "", "inline assembly"),
+}
+
+
+@pytest.mark.parametrize("cheat", sorted(CHEATS))
+def test_cheats_are_rejected_before_the_build(tmp_path, cheat):
+    at_start, appended, said = CHEATS[cheat]
+    src = baseline_source()
+    if at_start:
+        src = src.replace(CALL_START, CALL_START + at_start, 1)
+    path = tmp_path / "json_tokener.c"
+    path.write_text("#include <stdio.h>\n#include <stdlib.h>\n#include <unistd.h>\n" + src + appended)
+    result = run_check(path)
+    assert result.returncode == REJECTED, result.stdout + result.stderr
+    assert result.stdout.startswith("REJECTED") and said in result.stdout, result.stdout
+
+
 def test_deleting_a_public_function_is_a_build_error(tmp_path):
     # json_tokener_parse() and json_tokener_parse_verbose() removed.
     src = candidate(tmp_path)
@@ -320,7 +560,9 @@ def test_a_much_slower_rewrite_fails_as_a_timeout(tmp_path):
     # ~100k calls; with --slowdown 2 the limit is twice the baseline's time.
     slow = candidate(tmp_path, PARSE_EX_START, PARSE_EX_START + "\tusleep(200);\n")
     slow.write_text("#include <unistd.h>\n" + slow.read_text())
-    result = run_check(slow, "--timeout", "1", "--slowdown", "2")
+    # The anti-cheat check rejects this first (test_cheats_are_rejected_before_the_build);
+    # skipped here to test the run-time defence behind it.
+    result = run_check(slow, "--timeout", "1", "--slowdown", "2", "--skip-cheat-check")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "timed out" in result.stdout
     assert "the baseline took" in result.stdout

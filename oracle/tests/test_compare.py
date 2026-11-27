@@ -155,3 +155,65 @@ def test_long_inputs_are_shortened_in_the_report():
     first_line = text.split("\n")[0]
     assert len(first_line) < 300
     assert "(5003 bytes)" in first_line
+
+
+def test_answers_filed_after_the_last_input_are_named_as_the_api_calls():
+    # The recorder files its edge-case API calls one past the last input.
+    old = Run(BASELINE.replace("#done 3", "3\tapi/len=-2\tn\t15 buffer size overflow\t0\t-\n#done 3"), 0)
+    new = Run(BASELINE.replace("#done 3", "3\tapi/len=-2\tn\t3 unexpected end of data\t0\t-\n#done 3"), 0)
+    text = report(compare(old, new), INPUTS)
+    assert "the edge-case API calls (after the last input)" in text
+    assert "input #4" not in text
+
+
+def test_a_crash_is_placed_on_the_input_the_recorder_had_started():
+    # An answer about one input can be written while the next is worked on
+    # (two tokeners taking turns), so a missing answer for input 1 does not
+    # mean the crash happened there: the last "#input" line decides.
+    new = Run(
+        "#input 0\n" + "\n".join("\t".join(map(str, r)) for r in (
+            (0, "default", "a[i]", "0 success", 3, "[1]"),)) + "\n#input 1\n"
+        + "\t".join(map(str, (1, "default", "a[i]", "0 success", 3, "[2]"))) + "\n",
+        returncode=1,
+        stderr="==1==ERROR: AddressSanitizer: SEGV on unknown address",
+    )
+    verdict = compare(Run(BASELINE, 0), new)
+    assert verdict.status == "crash" and verdict.crash_index == 1
+    assert "on input #2: [2]" in report(verdict, INPUTS)
+
+
+# Answers given while the k-th allocation failed on purpose are judged by what
+# they say, not k by k: a rewrite may allocate in a different order.
+FAILURE_BASELINE = recorder_output(
+    (0, "oneshot/default", "a[i]", "0 success", 3, "[1]"),
+    (0, "oom1/default", "n", "16 out of memory", 0, "-"),
+    (0, "oom2/default", "n", "3 unexpected end of data", 1, "-"),  # a baseline quirk at k=2
+    (0, "oom3/default", "n", "16 out of memory", 2, "-"),
+    inputs=1,
+)
+
+
+def failure_candidate(*records):
+    return Run(recorder_output((0, "oneshot/default", "a[i]", "0 success", 3, "[1]"), *records, inputs=1), 0)
+
+
+@pytest.mark.parametrize("records", [
+    # the baseline's quirk moved to another k, at another position
+    [(0, "oom1/default", "n", "3 unexpected end of data", 0, "-"), (0, "oom2/default", "n", "16 out of memory", 1, "-")],
+    # out of memory where the baseline had the quirk
+    [(0, "oom2/default", "n", "16 out of memory", 1, "-")],
+    # one allocation more: the normal answer, or out of memory, at a k the baseline never reached
+    [(0, "oom4/default", "a[i]", "0 success", 3, "[1]"), (0, "oom5/default", "n", "16 out of memory", 2, "-")],
+    # fewer allocations: no answers at all
+    [],
+], ids=["quirk moved", "out of memory instead", "more allocations", "fewer allocations"])
+def test_answers_under_a_failed_allocation_may_differ_in_order(records):
+    verdict = compare(Run(FAILURE_BASELINE, 0), failure_candidate(*records))
+    assert verdict.status == "pass", report(verdict, ["[1]"])
+
+
+def test_an_answer_under_a_failed_allocation_the_baseline_never_gives_is_a_difference():
+    verdict = compare(Run(FAILURE_BASELINE, 0),
+                      failure_candidate((0, "oom1/default", "n", "4 unexpected character", 0, "-")))
+    assert verdict.status == "different"
+    assert "answer under a failed allocation" in report(verdict, ["[1]"])

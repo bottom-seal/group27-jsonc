@@ -1,0 +1,146 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "An object level",
+    "subtitle": "Entered from start on {; object_ prefix dropped; eatws runs between any two states",
+    "output": "object-level.html",
+    "quality_profile": "showcase",
+    "locale": "en"
+  },
+  "mainPath": [
+    "field_start",
+    "field",
+    "field_end",
+    "value",
+    "value_add",
+    "obj_sep"
+  ],
+  "states": [
+    {
+      "id": "field_start",
+      "type": "start",
+      "label": "field_start",
+      "sublabel": "key or }",
+      "explanation": "Accepts a double quote (and, even in STRICT mode, a single quote: bug hunt finding 4) to start a key, or '}' to close an empty object."
+    },
+    {
+      "id": "field",
+      "type": "active",
+      "label": "field",
+      "sublabel": "reads key",
+      "explanation": "A tight inner loop copies key bytes into tok->pb until the closing quote, then strdup()s it into obj_field_name. A backslash detours through the escape states."
+    },
+    {
+      "id": "field_end",
+      "type": "active",
+      "label": "field_end",
+      "sublabel": "expects :",
+      "explanation": "Requires ':' after the key; anything else is error parse_object_key_sep."
+    },
+    {
+      "id": "value",
+      "type": "waiting",
+      "label": "value",
+      "sublabel": "push child",
+      "explanation": "Checks the depth limit, sets this level to object_value_add, then depth++ and resets the new level to eatws/start. The member's value is parsed one level deeper."
+    },
+    {
+      "id": "value_add",
+      "type": "active",
+      "label": "value_add",
+      "sublabel": "add member",
+      "explanation": "Runs right after the child level finished and handed its value back in the local obj. Adds it to current under obj_field_name and frees the key."
+    },
+    {
+      "id": "obj_sep",
+      "type": "decision",
+      "label": "object_sep",
+      "sublabel": ", or }",
+      "explanation": "',' goes to object_field_start_after_sep (where '}' is rejected in STRICT mode); '}' finishes the object."
+    },
+    {
+      "id": "after_sep",
+      "type": "active",
+      "label": "field_start_after_sep",
+      "sublabel": "next key",
+      "explanation": "Same code as object_field_start, except that '}' here means a trailing comma, which STRICT mode rejects."
+    },
+    {
+      "id": "finish",
+      "type": "success",
+      "label": "finish",
+      "sublabel": "pop to parent",
+      "explanation": "At depth 0 the call jumps to out:. Deeper, it takes a reference to current into the local obj, resets this level, decrements depth and re-checks the same byte in the parent's state (array_add or object_value_add)."
+    },
+    {
+      "id": "error",
+      "type": "failure",
+      "label": "goto out",
+      "sublabel": "error",
+      "explanation": "Every state sets tok->err and jumps to out: on a byte it cannot accept."
+    }
+  ],
+  "transitions": [
+    {
+      "id": "o1",
+      "from": "field_start",
+      "to": "field",
+      "label": "quote"
+    },
+    {
+      "id": "o2",
+      "from": "field",
+      "to": "field_end"
+    },
+    {
+      "id": "o3",
+      "from": "field_end",
+      "to": "value",
+      "label": ":"
+    },
+    {
+      "id": "o4",
+      "from": "value",
+      "to": "value_add",
+      "label": "child done",
+      "variant": "emphasis"
+    },
+    {
+      "id": "o5",
+      "from": "value_add",
+      "to": "obj_sep"
+    },
+    {
+      "id": "o6",
+      "from": "obj_sep",
+      "to": "finish",
+      "label": "}"
+    },
+    {
+      "id": "o7",
+      "from": "obj_sep",
+      "to": "after_sep",
+      "label": ","
+    },
+    {
+      "id": "o8",
+      "from": "after_sep",
+      "to": "field",
+      "label": "quote"
+    },
+    {
+      "id": "o9",
+      "from": "field_start",
+      "to": "finish",
+      "label": "} empty"
+    },
+    {
+      "id": "o10",
+      "from": "field_end",
+      "to": "error",
+      "label": "not :",
+      "variant": "dashed"
+    }
+  ]
+}

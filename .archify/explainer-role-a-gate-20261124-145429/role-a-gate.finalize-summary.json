@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "explainer",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/candidate.archify.md",
+    "sha256": "dd56288faa8626e6ee51853d97378996cf73bba953bc2f8d2a243a9fabdb6945",
+    "bytes": 10872
+  },
+  "artifact": {
+    "path": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.html",
+    "sha256": "839e6b397e684cb3bf9f73db5802463edfbb249e0017352f70acbaa7b2f54df9",
+    "bytes": 1640291
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "not-run"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.finalize.json",
+    "summaryReceipt": "/home/lmz/software_testing/group27-jsonc/.archify/explainer-role-a-gate-20261124-145429/role-a-gate.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1426,
+  "browserCheck": {
+    "requested": false,
+    "ran": false
+  }
+}

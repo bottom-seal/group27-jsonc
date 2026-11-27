@@ -1,0 +1,13 @@
+# Who must approve a change, once branch protection on main has "Require
+# review from Code Owners" turned on (ci/protect-main.sh). The last matching
+# line wins.
+#
+# Role A owns the gate, and by default everything else. Add a second owner to
+# this line (for example Role C) before turning that protection on: GitHub
+# does not let anyone approve their own PR, so with a single owner Role A could
+# never merge a change to the gate.
+*                         @bottom-seal
+
+# Rewrite PRs: no code owner, so any teammate's approval is enough. The gate,
+# a required check, is what judges them.
+/json-c/json_tokener.c
