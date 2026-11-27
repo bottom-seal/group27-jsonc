@@ -15,7 +15,8 @@ Exit codes:
   3  build error: the candidate does not compile or link
   4  internal error: the checker itself could not run (e.g. baseline broken)
 
-Needs gcc, cmake and git on PATH (or set CC / CMAKE).
+Needs gcc, cmake and git on PATH (or set CC / CMAKE), and glibc's localedef
+with the de_DE locale sources (Ubuntu/Debian: the locales package).
 """
 import argparse
 import dataclasses
@@ -60,6 +61,11 @@ BASELINE_TREE = "6471b8bea91c872deb52fc74badcb8889bcddbaa"
 CMAKE_ARGS = ["-DBUILD_SHARED_LIBS=OFF", "-DBUILD_TESTING=OFF", "-DCMAKE_BUILD_TYPE=Debug",
               "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
 CACHE_FORMAT = 2  # bump when the cached build's layout or recipe changes
+
+# The recorder makes the Nth allocation fail on purpose (record_memory_failures
+# in recorder.c): every malloc, calloc, realloc and strdup it and the tokener
+# make goes through its wrappers.
+LINK_WRAP = ["-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=strdup"]
 
 BAD_ESCAPE = re.compile(r"\\x(?![0-9A-Fa-f]{2})")
 
@@ -124,6 +130,9 @@ class Baseline:
         self.cmake_dir = self.root / "cmake"
         self.rest_lib = self.root / "libjson-c-without-tokener.a"
         self.tokener_cmd = self.root / "tokener-compile.json"
+        # The recorder also parses under a locale with a decimal comma. Built
+        # in its own folder: it does not depend on json-c's build recipe.
+        self.locale_dir = (build_root / "locale").resolve()  # absolute: the recorder runs elsewhere
         # One builder at a time; "ready" is written last, so a build that was
         # interrupted is redone by the next run.
         build_root.mkdir(parents=True, exist_ok=True)
@@ -131,6 +140,8 @@ class Baseline:
             fcntl.flock(lock, fcntl.LOCK_EX)
             if not (self.root / "ready").exists():
                 self._build()
+            if not (self.locale_dir / "ready").exists():
+                self._build_locale()
 
     def _build(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -154,6 +165,18 @@ class Baseline:
         entry = next(c for c in commands if Path(c["file"]).name == "json_tokener.c")
         self.tokener_cmd.write_text(json.dumps(entry))
         (self.root / "ready").write_text("")
+
+    def _build_locale(self):
+        """de_DE.UTF-8, whose decimal point is ',', from the system's locale
+        sources. Failing here is a checker error, never a silently skipped check."""
+        shutil.rmtree(self.locale_dir, ignore_errors=True)
+        self.locale_dir.mkdir(parents=True)
+        result = sh(["localedef", "-i", "de_DE", "-f", "UTF-8", str(self.locale_dir / "de_DE.UTF-8")])
+        # localedef can warn and exit non-zero yet build the locale
+        if not (self.locale_dir / "de_DE.UTF-8" / "LC_NUMERIC").exists():
+            raise CheckerError("could not build the de_DE.UTF-8 locale with localedef"
+                               " (Ubuntu/Debian: install the locales package):\n" + result.stdout + result.stderr)
+        (self.locale_dir / "ready").write_text("")
 
     def compile_tokener(self, source: Path, obj: Path) -> subprocess.CompletedProcess:
         """Compile a json_tokener.c with exactly the flags cmake uses for the
@@ -182,8 +205,8 @@ class Baseline:
         # --whole-archive links every json-c object, as the real library build
         # does, so a candidate defining a symbol another json-c file owns gets
         # the same "multiple definition" error instead of silently winning.
-        return sh([CC, *SANITIZE, str(recorder_obj), str(tokener_obj),
-                   "-Wl,--whole-archive", str(self.rest_lib), "-Wl,--no-whole-archive", "-lm", "-o", str(out)])
+        return sh([CC, *SANITIZE, str(recorder_obj), str(tokener_obj), "-Wl,--whole-archive",
+                   str(self.rest_lib), "-Wl,--no-whole-archive", *LINK_WRAP, "-lm", "-o", str(out)])
 
     def compile_recorder(self, out: Path):
         must([CC, *SANITIZE, "-I", str(self.src), "-I", str(self.cmake_dir),
@@ -207,16 +230,19 @@ def load_inputs(paths) -> list:
     return lines
 
 
-def recorder_env() -> dict:
+def recorder_env(locale_dir: "Path | None" = None) -> dict:
     """The caller's environment without any sanitizer settings or preloads,
-    plus the checker's own sanitizer settings."""
+    plus the checker's own sanitizer settings, and LOCPATH set to the folder
+    with the de_DE.UTF-8 locale."""
     env = {key: value for key, value in os.environ.items()
-           if not key.endswith("SAN_OPTIONS") and key != "LD_PRELOAD"}
+           if not key.endswith("SAN_OPTIONS") and key not in ("LD_PRELOAD", "LOCPATH")}
     env.update(SANITIZER_ENV)
+    if locale_dir is not None:
+        env["LOCPATH"] = str(locale_dir)
     return env
 
 
-def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
+def run_recorder(binary: Path, inputs: list, timeout: float, locale_dir: "Path | None" = None) -> Run:
     """Run one recorder. Its answers go to a file next to the binary; what the
     process prints on stdout is kept separately (the tokener should print
     nothing). It runs in its own process group, which is killed afterwards, so
@@ -225,7 +251,7 @@ def run_recorder(binary: Path, inputs: list, timeout: float) -> Run:
     data = ("\n".join(inputs) + "\n").encode("latin-1")
     start = time.monotonic()
     proc = subprocess.Popen([str(binary), str(answers)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, env=recorder_env(), cwd=binary.parent,
+                            stderr=subprocess.PIPE, env=recorder_env(locale_dir), cwd=binary.parent,
                             start_new_session=True)
     try:
         printed, err = proc.communicate(data, timeout=timeout)
@@ -314,7 +340,7 @@ def check(args) -> int:
             print(f"BUILD ERROR: the candidate {args.candidate} does not build\n{problem}")
             return EXIT_BUILD
 
-        old = run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT)
+        old = run_recorder(tmp / "old", inputs, BASELINE_TIME_LIMIT, baseline.locale_dir)
         base = parse_output(old.output)
         if old.returncode != 0 or old.timed_out or base.problems or base.done != len(inputs):
             raise CheckerError(
@@ -322,7 +348,7 @@ def check(args) -> int:
                 f" problems {base.problems[:3]}):\n{old.stderr[-3000:]}")
         # The candidate must not be able to run the baseline in its place.
         (tmp / "old").unlink()
-        new = run_recorder(tmp / "new", inputs, max(args.timeout, args.slowdown * old.elapsed))
+        new = run_recorder(tmp / "new", inputs, max(args.timeout, args.slowdown * old.elapsed), baseline.locale_dir)
         # Sanitizer reports should name the candidate file, not the temporary copy.
         new = dataclasses.replace(new, stderr=new.stderr.replace(str(placed_source(tmp / "new.o")), args.candidate))
 

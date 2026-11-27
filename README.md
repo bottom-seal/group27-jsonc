@@ -14,6 +14,7 @@ catch yet is listed in `oracle/README.md`.
 | `json-c/` | json-c at commit `d2ce61e`, tagged `baseline` | Only rewrite PRs, and only `json-c/json_tokener.c` |
 | `oracle/` | The gate's checks: old-vs-new comparison now; chunked feeding and fuzzing to come | Role A |
 | `bughunt/` | Earlier bug hunt: 8 json-c bugs, reproducers and harnesses. Reference only | Nobody |
+| `ci/`, `.github/` | The checks every pull request must pass, path rules, code owners. See `ci/README.md` | Role A |
 
 ## Baseline
 
