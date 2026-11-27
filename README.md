@@ -12,8 +12,10 @@ catch yet is listed in `oracle/README.md`.
 | Path | What it is | Who changes it |
 |---|---|---|
 | `json-c/` | json-c at commit `d2ce61e`, tagged `baseline` | Only rewrite PRs, and only `json-c/json_tokener.c` |
-| `oracle/` | The gate's checks: old-vs-new comparison now; chunked feeding and fuzzing to come | Role A |
+| `oracle/` | The gate's checks: old-vs-new comparison, including text fed in pieces, allocation failures and a decimal-comma locale | Role A |
+| `fuzz/` | Differential fuzzer: the baseline and a rewrite in one program, fed generated inputs. See `fuzz/README.md` | Role A |
 | `bughunt/` | Earlier bug hunt: 8 json-c bugs, reproducers and harnesses. Reference only | Nobody |
+| `ci/`, `.github/` | The checks every pull request must pass, path rules, code owners. See `ci/README.md` | Role A |
 
 ## Baseline
 

@@ -1,0 +1,87 @@
+# The gate every pull request must pass. See ci/README.md.
+#
+# A rewrite PR may only change json-c/json_tokener.c (ci/check_paths.py), so it
+# is always judged by main's own checker and by this file as it is on main. A PR
+# that changes the checker, the CI or this file needs Role A's approval
+# (.github/CODEOWNERS, enforced by branch protection on main).
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paths:
+    name: paths
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # the PR's merge commit and its first parent, the base
+      - name: Check which files the PR changes
+        run: python3 ci/check_paths.py HEAD^1 HEAD
+
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the checker reads the pinned baseline from git history
+      - name: Compare json_tokener.c with the baseline
+        run: |
+          set -o pipefail
+          python3 oracle/check.py | tee report.txt
+      - name: Put the report on the run's summary page
+        if: always()
+        run: |
+          {
+            echo '## Gate report'
+            echo '```'
+            head -c 60000 report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Not a required check (ci/protect-main.sh): a short run can miss what a
+  # long one finds, so passing says little. A failure is always a real
+  # difference: the baseline fuzzed against itself never fails.
+  fuzz:
+    name: fuzz
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the fuzzer reads the pinned baseline from git history
+      - name: Is this a rewrite PR?
+        id: kind
+        run: |
+          if git diff --name-only HEAD^1 HEAD | grep -qx 'json-c/json_tokener.c'; then
+            echo "rewrite=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fuzz the rewrite against the baseline for 5 minutes
+        if: steps.kind.outputs.rewrite == 'true'
+        run: |
+          set -o pipefail
+          python3 fuzz/fuzz.py --seconds 300 --jobs 2 | tee fuzz-report.txt
+      - name: Put the report on the run's summary page
+        if: always() && steps.kind.outputs.rewrite == 'true'
+        run: |
+          {
+            echo '## Fuzz report'
+            echo '```'
+            head -c 60000 fuzz-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

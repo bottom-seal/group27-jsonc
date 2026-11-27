@@ -11,9 +11,10 @@ python3 oracle/check.py                     # checks json-c/json_tokener.c in th
 python3 oracle/check.py path/to/json_tokener.c
 ```
 
-Needs `gcc`, `cmake`, `git` (a clone with full history) and Python 3. The first
-run builds json-c once into `.build/oracle/` (about 10 seconds); after that a
-check takes a few seconds.
+Needs `gcc`, `cmake`, `git` (a clone with full history), glibc's `localedef`
+with the `de_DE` locale sources (Ubuntu/Debian: the `locales` package) and
+Python 3. The first run builds json-c and a `de_DE.UTF-8` locale once into
+`.build/oracle/` (about 10 seconds); after that a check takes about 20 seconds.
 
 Options: `--inputs FILE` (repeat it for several files; default: every
 `oracle/inputs/*.txt`),
@@ -28,21 +29,112 @@ Options: `--inputs FILE` (repeat it for several files; default: every
 | 2 | `CRASH` | The candidate crashed, stopped early, leaked memory, a sanitizer (ASan/UBSan/LSan) reported an error even if every answer was right, or it ran too long: more than `--slowdown` (20) times the baseline's time, and at least `--timeout` (10) seconds. The report names the input it was on and the sanitizer's explanation. |
 | 3 | `BUILD ERROR` | The candidate does not compile or link as part of json-c, or it `#include`s another `.c` file. json-c builds with `-Werror`, so new compiler warnings count too. |
 | 4 | `CHECKER ERROR` | The checker could not run: a missing file, a malformed input file, missing tools, or a bug in the checker. Never a verdict on the candidate. |
+| 5 | `REJECTED` | The anti-cheat check (below) found something a rewrite of the tokener must not do. The report lists what. The candidate is not built or run. |
 
 Fixing one of the known json-c bugs (see `bughunt/README.md`) is a change in
 behaviour, so it fails the check.
 
+## Anti-cheat check
+
+Before the candidate is built, `cheats.py` compares it with the baseline
+source and rejects it if it could pass without behaving like the baseline:
+
+1. **Calls.** Compiled without instrumentation, every function it calls must
+   be one the rest of json-c defines (except json-c's file, logging,
+   library-wide settings and random seed functions), one the baseline calls,
+   or a pure C library function (`memcpy`, `strlen`, `strtod`, `malloc`, ...).
+   That shuts out the environment, files, time, randomness, threads,
+   signals, exiting, printing, `dlsym`, and `__real_malloc` (which would get
+   around the allocation-failure wrappers).
+2. **Definitions.** No global symbol the C library or the sanitizer runtime
+   defines (`malloc`, `__lsan_is_turned_off`, `__asan_default_options`, ...),
+   nothing starting with `__`, no `main` or libFuzzer entry point.
+3. **Compiler tricks** in its own code: attributes such as `no_sanitize`,
+   `constructor` or `optimize`, inline assembly, pragmas.
+4. **Build detection:** macros that tell a sanitizer, fuzzer, coverage or
+   optimised build apart (`__SANITIZE_ADDRESS__`,
+   `FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION`, `__OPTIMIZE__`, ...).
+5. **Hard-coded answers:** a new string literal of 4 or more characters that
+   occurs in one of the gate's inputs.
+
+Whatever the baseline itself does stays allowed. On the gate review's 2,401
+mutants (honest code changes) it rejected none. The other half of the
+proposal's cheat detection, a rewrite PR changing tests or deleting
+assertions, is the path rules' job (`ci/README.md`).
+
 ## What is compared
 
-Each input is given to the tokener 29 ways (`record_input` in `recorder.c`):
+Each input is given to the tokener in these ways (`record_input` in
+`recorder.c`).
+
+**One call:**
 
 - `oneshot`, `noterm` (no final NUL, so incomplete input answers "continue"),
   `minus1` (`len = -1`, as `json_tokener_parse()` uses) and `reuse` (one
-  tokener for all inputs, `json_tokener_reset()` after each), each under 6 flag
-  settings: `default`, `strict`, `utf8`, `strict+utf8`, `strict+trailing`,
-  `strict+trailing+utf8`
+  tokener for all inputs, `json_tokener_reset()` after each), each under all 8
+  combinations of `STRICT`, `VALIDATE_UTF8` and `ALLOW_TRAILING_CHARS`:
+  `default`, `strict`, `utf8`, `strict+utf8`, `strict+trailing`,
+  `strict+trailing+utf8`, `trailing`, `trailing+utf8`
 - `parse` (`json_tokener_parse()`) and `verbose` (`json_tokener_parse_verbose()`)
 - `depth1`, `depth5`, `depth64` (`json_tokener_new_ex()` with that depth)
+
+**More than one call:**
+
+- `bytewise`: one byte per call, under all 8 flag settings, and
+  `bytewise-depth5` with nesting limit 5. Texts over 4,096 bytes go in
+  4,096-byte pieces.
+- `split<k>`: texts up to 64 bytes cut in two after byte k, for every k, under
+  `default`, `strict` and `utf8`.
+- `stream<d>`: one tokener per flag setting reads document after document from
+  the same text, without a reset in between (up to 8). It is reset before each
+  input and stops at an embedded NUL byte: past either point the baseline
+  itself leaks after bug-hunt finding 1.
+- `turns-with-previous` and `turns-with-next`: this input and the previous one
+  on two tokeners, fed one byte at a time in turns, under `default`, `strict`
+  and `utf8`. Each answer is filed under the input it is about. (The recorder
+  writes `#input N` before each input, so a crash is still reported on the
+  input it was working on.)
+- Every multi-call way also records how many calls it took (`bytewise-calls`,
+  `split<k>-calls`).
+
+Text in pieces is compared with the baseline fed the same pieces, never with
+the one-call answer: the baseline itself answers differently in pieces in a
+few known cases (`[12-3]`, a UTF-8 character split across calls, `1 2` under
+`STRICT`; see `bughunt/README.md`), and a rewrite must keep those.
+
+**When something around the parse goes wrong:**
+
+- `oom<k>` and `oomb<k>`: the k-th memory allocation during the parse fails on
+  purpose, for k = 1, 2, … until a parse makes fewer than k allocations (at
+  most 400). One call under `default` and `strict`, and byte by byte (`oomb`)
+  under `default` for inputs up to 64 bytes; inputs over 1,000 bytes are
+  skipped. The recorder is linked with `-Wl,--wrap=malloc` (and `calloc`,
+  `realloc`, `strdup`), so the tokener's own allocations go through it.
+  A rewrite may allocate in a different order, so these answers are not
+  matched k by k. Each answer the candidate gives under a failed allocation
+  must be one of: an answer the baseline gave for the same input and way
+  under some failed allocation (its quirks may move), "out of memory", or the
+  answer of the same parse with nothing failing. Where it stopped is not
+  compared, more or fewer allocations are fine, and a crash or leak still
+  fails.
+- `de_DE` and `de_DE-restored`: the input parsed under `de_DE.UTF-8`, whose
+  decimal point is `,`, under `default` and `strict`, and whether the caller's
+  locale is back after the call. json-c must switch to the C number format
+  inside each call, or `strtod` reads `1.5` the German way.
+- `afterreset/error` and `afterreset/next`: stop partway (no end byte), reset;
+  the error must then read "success", and a fixed document must parse as on a
+  fresh tokener.
+- `oomv<k>`: the k-th allocation inside `json_tokener_parse_verbose()` fails,
+  which also reaches the allocations that create its tokener.
+- `two/strict-depth5` and `two/default-depth64`: two tokeners with different
+  flags and nesting limits, both created before either is used, so settings
+  kept anywhere but in the tokener show up.
+
+**Edge-case API calls, once** (`record_api`): `len` = -2 and `INT_MIN`,
+`json_tokener_new_ex(0)` and `(-1)`, `json_tokener_error_desc()` for -2 to 19,
+`json_tokener_free(NULL)` / `json_tokener_reset(NULL)`, and `json_tokener_new()`
+and `json_tokener_new_ex(5)` with their k-th allocation failing (`oomnew<k>`). They are filed one
+past the last input, and the report calls them "the edge-case API calls".
 
 For each, the recorder writes one answer:
 
@@ -56,8 +148,25 @@ For each, the recorder writes one answer:
 The candidate must give exactly the baseline's set of answers. Answers go to
 their own file, and what the process prints to stdout is compared separately.
 
-`inputs/core.txt` is the bug hunt's input set: 3,402 inputs (one of them the
-empty line), so a full check is 98,658 answers. One input per line; `\xNN`
+Inputs, one per line:
+
+- `inputs/core.txt`: the bug hunt's input set (3,402 inputs, one of them the
+  empty line).
+- `inputs/multi.txt`: 12 texts with several documents each, for `stream`.
+- `inputs/large.txt`: 9 texts from 62 bytes to 300 KB, so that work growing
+  faster than the length shows up as a timeout: a 200 KB string, 300 KB of
+  `\u00e9` escapes, a 20,000-digit number, 200 KB of spaces, a 200 KB comment,
+  an array of 50,000 numbers, an object with 20,000 keys, 31 nested arrays and
+  a 206 KB string in an array.
+- `inputs/fuzz.txt`: inputs the differential fuzzer found that the others miss.
+- `inputs/neighbours.txt`: 2,268 inputs made from 120 short documents in
+  `core.txt` that the baseline accepts, by replacing each character the
+  tokener compares against (`{ } [ ] , : " * + - . / 0-9 e E` and the letters
+  of `true`, `false`, `null`, `NaN`, `Infinity`) with the byte just below or
+  just above it, one at a time. Mistakes like `c == '}'` becoming `c >= '}'`
+  need such a neighbour (here `~`) in the right place.
+
+A full check is 1,051,570 answers. `\xNN`
 (exactly two hex digits) stands for the byte 0xNN, and a literal backslash
 before `x` is written `\x5c`.
 
@@ -71,17 +180,56 @@ before `x` is written `\x5c`.
    build. Both versions link against it with `--whole-archive`, as the real
    library build does, so they can only differ in the tokener.
 3. **Both tokeners** are compiled with the exact command cmake uses, in a
-   temporary folder outside the cache, then linked with `recorder.c`.
+   temporary folder outside the cache, then linked with `recorder.c` and its
+   allocation wrappers. The `de_DE.UTF-8` locale is built once into
+   `.build/oracle/locale/`, and the recorder runs with `LOCPATH` pointing there.
 4. **The baseline runs first**; its time sets the candidate's time limit, and
    its binary is deleted before the candidate runs. Both run with fixed
    sanitizer settings, in their own process group, which is killed afterwards.
 5. **`compare.py`** compares the answers and prints the report.
 
+## Metrics (report only)
+
+```bash
+python3 oracle/metrics.py                          # the working tree's json_tokener.c
+python3 oracle/metrics.py path/to/json_tokener.c --json metrics.json
+```
+
+`metrics.py` makes the same comparison as `check.py` and prints its verdict
+line, then numbers about what the gate's inputs exercise. They never change the
+verdict: the exit code is 0 whenever the report is written (3 if the candidate
+does not build, 4 if the script cannot run). A run takes a few seconds.
+
+- **Time**: best of `--repeat` (3) runs of the gate's own build, for the
+  baseline and the candidate, and the ratio. The gate fails a candidate only
+  above 20 times the baseline's time.
+- **Coverage**: lines and branches of `json_tokener.c` that the inputs run, for
+  both versions and per function, from a second build with gcov (the tokener
+  at `-O0` without sanitizers, so the counts follow the source).
+- **Unrun lines** of the candidate, matched to the baseline's lines (ignoring
+  indentation) and split three ways:
+  - *unrun in the baseline too*: mostly out-of-memory handling;
+  - *ran in the baseline, not here*: the inputs no longer reach code they
+    reached before;
+  - *new or changed code*: no input runs it, so the gate says nothing about it.
+    A special case hidden in a rewrite shows up here.
+- **States**: how often the inputs enter each state of `json_tokener_parse_ex`,
+  for a source that keeps the `case json_tokener_state_...:` labels.
+- **Answers**: which error codes the baseline's answers contain, and which never
+  appear.
+- **Inputs**: how many, the longest, how many are over 1,000 bytes.
+
+Coverage shows which code the inputs reach, not how well the answers there are
+checked: code can run on every input and still be wrong in a way no input
+shows. Needs gcc's `gcov` (set `GCOV` to use another).
+
 ## Tests
 
 ```bash
-python3 -m pytest oracle/tests     # about 90 seconds
+python3 -m pytest oracle/tests     # about 8 minutes
 ```
+
+CI does not run these (see `ci/README.md`); run them before changing the gate.
 
 - `tests/test_check.py` runs the whole checker on planted versions of
   `json_tokener.c`: unchanged; quietly fixing known bugs 1–4 (each must differ
@@ -90,27 +238,49 @@ python3 -m pytest oracle/tests     # about 90 seconds
   build errors, symbol clashes and an `#include` of the baseline; printing to
   stdout and faking the end of the run; a tampered cache; two first runs at
   once; and broken input files.
+- It also plants mistakes that only show across calls or through the API: state
+  not reset or not kept between calls, values shared by all tokeners, the
+  trailing-characters check rewritten for the flag sets without `STRICT`, and
+  wrong answers for `len < -1` and `json_tokener_new_ex(0)`.
+- A resumed number accepting a sign it should not, which only a
+  neighbour input shows.
+- And mistakes that only show when an allocation fails, under the `de_DE`
+  locale, right after a reset, on a fuzzer-found input, or as a timeout on the
+  large inputs; when creating a tokener runs out of memory, inside
+  `json_tokener_parse_verbose()`, or with two tokeners of different settings.
+  A correct rewrite that makes one extra allocation must pass.
+- And cheats the anti-cheat check must reject before the build: reading the
+  environment, writing files (directly or through json-c), getting around the
+  allocation wrappers, printing, exiting, sleeping, sanitizer hooks and
+  attributes, constructors, testing for the sanitizer or fuzzer build, inline
+  assembly, and text from the gate's inputs. The tests of the run-time
+  defences behind it (stdout comparison, fixed sanitizer settings, the time
+  limit) pass `--skip-cheat-check`, which CI never does.
 - `tests/test_compare.py` checks the comparison and the report on hand-written
   recorder output.
+- `tests/test_metrics.py` runs `metrics.py` on planted versions: unchanged (the
+  same numbers as the baseline); a special case no input reaches (listed as new
+  code the gate never runs, though the verdict is PASS); a change that stops
+  the inputs reaching some states; a crash; and a build error.
 
 ## Known gaps
 
 Not checked yet, mostly left for later tasks:
 
-- **Feeding input in pieces** (task 2) and **fuzzing** (task 3).
-- **Deliberate tampering** (task 5). The candidate still runs with the user's
-  permissions, so it could write to the cached headers and library, or to
-  other files. It could also use sanitizer hooks (`__lsan_is_turned_off`),
-  `no_sanitize` attributes, or detect the sanitizer build and behave
-  differently there. The planned defences are running the candidate without
-  write access, checking which symbols it defines and uses, and comparing a
-  second build without sanitizers.
+- **Fuzzing** (task 3).
+- **Tampering the anti-cheat check cannot see.** It reads source and
+  symbols, so a candidate that hides an answer (spelled out character by
+  character, or matched by a hash of the input) or misbehaves only on inputs
+  the gate never sends passes it. The differential fuzzer (`fuzz/`) and
+  `metrics.py`'s list of new code no input runs are the defences there. The
+  candidate also still runs with the user's permissions; the anti-cheat
+  check keeps it from calling anything that touches files.
 - **Other files in a rewrite PR.** The checker compiles the candidate against
   the baseline headers and ignores changes to any other file. CI must reject
   rewrite PRs that touch anything besides `json-c/json_tokener.c`.
-- **Locale.** The recorder runs in the C locale, so a rewrite that drops
-  json-c's switch to the C number format would only misbehave under a locale
-  with a decimal comma (such as `de_DE`), which is not installed here.
-- **Bugs 5–8** in `bughunt/README.md` and allocation-failure paths in general:
-  an answer comparison cannot see out-of-memory handling, threads, or
-  memory growth.
+- **Allocation failures are judged loosely.** A rewrite that, under a failed
+  allocation, gives an answer the baseline gives for the same input under
+  some other failed allocation passes, even if it is not the baseline's
+  answer for this one.
+- **Threads and memory growth** (bugs 8 and 7 in `bughunt/README.md`): an
+  answer comparison cannot see data races or how much memory is held.
