@@ -8,11 +8,22 @@ and, once every input is answered, a final line "#done <number of inputs>".
 This module turns two such outputs into a verdict and a human-readable report.
 The candidate must give exactly the baseline's set of answers: a missing,
 extra, duplicated or unreadable line is a difference, never ignored.
+
+The one exception is answers given while an allocation fails on purpose
+(see _acceptable_under_failure): a rewrite may allocate in a different order,
+so those are judged by what they say, not by matching the baseline's k.
 """
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
 FIELDS = ("type", "error", "end", "value")
+
+# Answers given while the k-th allocation failed on purpose (recorder.c):
+# "oom<k>/<flags>", "oomb<k>/<flags>", "oomv<k>/default", "api/oomnew<k>/<which>".
+_UNDER_FAILURE = re.compile(r"^(?:(oomb|oomv|oom)\d+|api/(oomnew)\d+)/(.*)$")
+_SAME_PARSE_WITHOUT_FAILURE = {"oom": "oneshot", "oomb": "bytewise"}
+OUT_OF_MEMORY = "16 out of memory"
 
 
 @dataclass(frozen=True)
@@ -36,6 +47,8 @@ class Mismatch:
 
     @property
     def fields(self) -> list:
+        if _failure_group(self.config):
+            return ["answer under a failed allocation"]
         if self.old is None:
             return ["extra answer"]
         if self.new is None:
@@ -59,6 +72,7 @@ class Output:
     records: dict
     problems: list
     done: "int | None"  # inputs read, from the "#done" line; None if it never came
+    started: "int | None" = None  # the last "#input" line: the input being worked on
 
 
 def parse_output(text: str) -> Output:
@@ -70,6 +84,8 @@ def parse_output(text: str) -> Output:
         fields = line.split("\t", len(FIELDS) + 1)
         if line.startswith("#done ") and line[6:].isdigit() and out.done is None:
             out.done = int(line[6:])
+        elif line.startswith("#input ") and line[7:].isdigit():
+            out.started = int(line[7:])
         elif len(fields) != len(FIELDS) + 2 or not fields[0].isdigit():
             out.problems.append(f"unreadable line: {line[:200]}")
         elif (int(fields[0]), fields[1]) in out.records:
@@ -77,6 +93,43 @@ def parse_output(text: str) -> Output:
         else:
             out.records[(int(fields[0]), fields[1])] = tuple(fields[2:])
     return out
+
+
+def _failure_group(config: str) -> "tuple | None":
+    """(way, flags) for an answer given while an allocation failed, else None."""
+    m = _UNDER_FAILURE.match(config)
+    return (m.group(1) or m.group(2), m.group(3)) if m else None
+
+
+def _answers_under_failure(records: dict) -> dict:
+    """For each (input, way, flags): every (type, error, value) the baseline
+    gave with some allocation failing, whichever k it was."""
+    seen = {}
+    for (index, config), (typ, err, _end, value) in records.items():
+        group = _failure_group(config)
+        if group:
+            seen.setdefault((index, *group), set()).add((typ, err, value))
+    return seen
+
+
+def _acceptable_under_failure(index: int, group: tuple, answer: tuple, seen: dict, base: dict) -> bool:
+    """A rewrite may allocate differently, so its k-th allocation is not the
+    baseline's k-th. Under a failed allocation it may answer anything the
+    baseline answered for this input and way under some failed allocation
+    (so the baseline's quirks are allowed wherever they move), report "out of
+    memory", or give the answer of the same parse with nothing failing.
+    Where it stopped (parse end) is not compared. Crashes and leaks still fail
+    through the sanitizers, and having more or fewer allocations is fine."""
+    typ, err, _end, value = answer
+    way, flags = group
+    if (typ, err, value) in seen.get((index, way, flags), ()):
+        return True
+    if way == "oomnew":  # creating a tokener: NULL is the only other right answer
+        return value == "NULL"
+    if err == OUT_OF_MEMORY and value == "-":
+        return True
+    normal = base.get((index, "verbose" if way == "oomv" else f"{_SAME_PARSE_WITHOUT_FAILURE[way]}/{flags}"))
+    return normal is not None and (typ, err, value) == (normal[0], normal[1], normal[3])
 
 
 def compare(old: Run, new: Run) -> Verdict:
@@ -88,10 +141,19 @@ def compare(old: Run, new: Run) -> Verdict:
 
     mismatches = []
     for key, answer in base.records.items():
+        if _failure_group(key[1]):
+            continue  # judged from the candidate's answers, below
         got = cand.records.get(key)
         if got != answer and not (got is None and reason):  # after a crash, missing answers are expected
             mismatches.append(Mismatch(*key, answer, got))
-    mismatches += [Mismatch(*key, None, got) for key, got in cand.records.items() if key not in base.records]
+    seen = _answers_under_failure(base.records)
+    for key, got in cand.records.items():
+        group = _failure_group(key[1])
+        if group:
+            if not _acceptable_under_failure(key[0], group, got, seen, base.records):
+                mismatches.append(Mismatch(*key, base.records.get(key), got))
+        elif key not in base.records:
+            mismatches.append(Mismatch(*key, None, got))
 
     problems = list(cand.problems)
     if new.printed != old.printed:
@@ -104,8 +166,14 @@ def compare(old: Run, new: Run) -> Verdict:
     if reason:
         verdict.crash_reason = reason
         verdict.crash_log = new.stderr
+        # The input the candidate was working on: the last "#input" line it
+        # wrote, or, for output without those lines, the first input with a
+        # missing answer. Nothing missing means it stopped after the last answer.
         missing = [index for (index, config) in base.records if (index, config) not in cand.records]
-        verdict.crash_index = min(missing) if missing else None
+        if not missing:
+            verdict.crash_index = None
+        else:
+            verdict.crash_index = cand.started if cand.started is not None else min(missing)
     return verdict
 
 
@@ -131,6 +199,14 @@ def _input_text(inputs: list, index: int, limit: int = 120) -> str:
         return "(no such input)"
     text = inputs[index]
     return text if len(text) <= limit else f"{text[:limit]}... ({len(text)} bytes)"
+
+
+def _which(inputs: list, index: int) -> str:
+    """Name the input an answer belongs to. The recorder files its edge-case
+    API calls, which use no input, one past the last input."""
+    if index == len(inputs):
+        return "the edge-case API calls (after the last input)"
+    return f"input #{index + 1}: {_input_text(inputs, index)}"
 
 
 def _answer(values: "tuple | None") -> str:
@@ -166,7 +242,7 @@ def _crash_report(verdict: Verdict, inputs: list, log_lines: int = 40) -> list:
     if verdict.crash_index is None:
         where = "after answering every input (at exit)"
     else:
-        where = f"on input #{verdict.crash_index + 1}: {_input_text(inputs, verdict.crash_index)}"
+        where = f"on {_which(inputs, verdict.crash_index)}"
     lines = [f"CRASH: candidate {verdict.crash_reason} {where}"]
     excerpt = _log_excerpt(verdict.crash_log, log_lines)
     if excerpt:
@@ -209,7 +285,7 @@ def _difference_report(verdict: Verdict, inputs: list, max_examples: int) -> lis
         lines += ["", f"Smallest differing inputs ({len(shown)} of {len(by_input)}):"]
         for index in shown:
             first, *rest = by_input[index]
-            lines.append(f"  input #{index + 1}: {_input_text(inputs, index)}")
+            lines.append(f"  {_which(inputs, index)}")
             lines.append(f"    config {first.config}" + (f" (also {', '.join(m.config for m in rest)})" if rest else ""))
             lines.append(f"      baseline:  {_answer(first.old)}")
             lines.append(f"      candidate: {_answer(first.new)}")
